@@ -21,7 +21,11 @@
 #include <unordered_set>
 #include <vector>
 #include <bit>
+#include <cstdlib>
 #include <numeric>
+#ifdef __linux__
+#include <unistd.h>
+#endif
 #include "common/cityhash.h"
 #include "common/scope_exit.h"
 #include "common/fs/fs.h"
@@ -471,9 +475,34 @@ struct DeferredStages {
     std::array<std::vector<u32>, Maxwell::MaxShaderStage> reference_spirv;
 };
 
+/// At most this many shader workers: EDEN_NX2_PIPELINE_WORKERS=<1..64>, else 4 on Linux PCs with
+/// 16 GB of RAM or less (each worker holds a few hundred MB while it translates a large program:
+/// with 15 at a time an Ocarina area change filled 16 GB and earlyoom killed the emulator).
+size_t PipelineWorkerCap() {
+    static const size_t cap = []() -> size_t {
+        if (const char* value = std::getenv("EDEN_NX2_PIPELINE_WORKERS")) {
+            const long parsed = std::strtol(value, nullptr, 10);
+            if (parsed >= 1 && parsed <= 64) {
+                return static_cast<size_t>(parsed);
+            }
+        }
+#ifdef __linux__
+        const long pages = sysconf(_SC_PHYS_PAGES);
+        const long page_size = sysconf(_SC_PAGE_SIZE);
+        if (pages > 0 && page_size > 0 &&
+            static_cast<u64>(pages) * static_cast<u64>(page_size) <= (u64{17} << 30)) {
+            return 4;
+        }
+#endif
+        return (std::numeric_limits<size_t>::max)();
+    }();
+    return cap;
+}
+
 size_t GetTotalPipelineWorkers() {
-    const size_t max_core_threads =
-        std::max<size_t>(static_cast<size_t>(std::thread::hardware_concurrency()), 2ULL) - 1ULL;
+    const size_t max_core_threads = std::min<size_t>(
+        std::max<size_t>(static_cast<size_t>(std::thread::hardware_concurrency()), 2ULL) - 1ULL,
+        PipelineWorkerCap());
 #ifdef __ANDROID__
     const int configured = AndroidSettings::values.pipeline_worker_count.GetValue();
     const int clamped = std::clamp(configured, 2, 8);
@@ -746,7 +775,10 @@ PipelineCache::PipelineCache(Tegra::MaxwellDeviceMemoryManager& device_memory_,
     const size_t driver_threads =
         device.HasBrokenParallelShaderCompiling()
             ? 1
-            : std::min(cpu_threads, std::max<size_t>(std::thread::hardware_concurrency() / 2, 2));
+            : std::min({cpu_threads, std::max<size_t>(std::thread::hardware_concurrency() / 2, 2),
+                        std::max<size_t>(PipelineWorkerCap() / 2, 2)});
+    LOG_INFO(Render_Vulkan, "Shader workers: {} translating, {} in the driver", cpu_threads,
+             driver_threads);
     shader_jobs.emplace(VideoCommon::ShaderJobConfig{
         .cpu_threads = cpu_threads,
         .driver_threads = driver_threads,
