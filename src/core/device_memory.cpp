@@ -1,14 +1,18 @@
 // SPDX-FileCopyrightText: Copyright 2020 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__linux__)
 #include <algorithm>
 #include <chrono>
 #include <condition_variable>
+#include <cstdlib>
 #include <mutex>
 
 #include "common/logging.h"
 #include "common/thread.h"
+#endif
+#if defined(__linux__) && defined(__GLIBC__)
+#include <malloc.h>
 #endif
 
 #include "core/device_memory.h"
@@ -25,17 +29,25 @@ constexpr size_t VirtualReserveSize = 1ULL << 39;
 DeviceMemory::DeviceMemory()
     : buffer{Kernel::Board::Nintendo::Nx::KSystemControl::Init::GetIntendedMemorySize(),
              VirtualReserveSize} {
-#ifdef _WIN32
+#if defined(_WIN32)
     zero_trim_thread = std::jthread{[this](std::stop_token stop) { TrimZeroPages(stop); }};
+#elif defined(__linux__)
+    // EDEN_NX2_ZERO_TRIM=0 turns it off on Linux
+    const char* zero_trim = std::getenv("EDEN_NX2_ZERO_TRIM");
+    if (zero_trim == nullptr || zero_trim[0] != '0') {
+        zero_trim_thread = std::jthread{[this](std::stop_token stop) { TrimZeroPages(stop); }};
+    }
 #endif
 }
 
 DeviceMemory::~DeviceMemory() = default;
 
-#ifdef _WIN32
-// Windows can't punch holes in the guest memory section, so pages holding only zeros (games clear
-// their heaps while booting: Ocarina leaves ~7 GB) stay resident until they leave the working set.
-// A pass comes every 5 s while they keep turning up, backing off to once a minute.
+#if defined(_WIN32) || defined(__linux__)
+// Pages holding only zeros (games clear their heaps while booting: Ocarina leaves ~7 GB) stay
+// resident: Windows takes them out of the working set, Linux punches the idle ones out of the
+// memfd (HostMemory::TrimZeroPages). On Linux each pass also hands the emulator's freed heap
+// memory back to the system (malloc_trim). A pass comes every 5 s while they keep turning up,
+// backing off to once a minute.
 void DeviceMemory::TrimZeroPages(std::stop_token stop) {
     using namespace std::chrono_literals;
     Common::SetCurrentThreadName("ZeroTrim");
@@ -54,6 +66,9 @@ void DeviceMemory::TrimZeroPages(std::stop_token stop) {
         }
         const auto start = std::chrono::steady_clock::now();
         const auto [resident, trimmed] = buffer.TrimZeroPages();
+#if defined(__linux__) && defined(__GLIBC__)
+        malloc_trim(0);
+#endif
         const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                             std::chrono::steady_clock::now() - start)
                             .count();

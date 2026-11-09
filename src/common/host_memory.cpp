@@ -60,6 +60,7 @@
 #include <mutex>
 #include <random>
 #include <utility>
+#include <vector>
 
 #include "common/alignment.h"
 #include "common/assert.h"
@@ -831,6 +832,15 @@ public:
     u8* virtual_base{reinterpret_cast<u8*>(MAP_FAILED)};
     u8* virtual_map_base{reinterpret_cast<u8*>(MAP_FAILED)};
 
+    /// For HostMemory::TrimZeroPages: the memfd (-1 without one) and the host page size
+    int MemoryFd() const noexcept {
+        return fd;
+    }
+    size_t HostPageSize() const noexcept {
+        return host_page_size;
+    }
+    std::vector<u64> zero_seen; ///< TrimZeroPages (Linux): pages all-zero in the previous pass
+
 private:
     /// Release all resources in the object
     void Release() {
@@ -1213,6 +1223,80 @@ std::pair<size_t, size_t> HostMemory::TrimZeroPages() const {
         i = j;
     }
     return {(backing_pages.size() + view_pages.size()) * PageAlignment, zero_bytes};
+#elif defined(__linux__)
+    // The memfd holds the guest's memory: a page punched out of it frees its RAM and reads as
+    // zeros afterwards, through the backing and every view. Unlike VirtualUnlock this drops the
+    // contents, so only pages that were all-zero in the previous pass too (idle, not just cleared
+    // and about to be filled) are punched, each run checked again right before the punch.
+    if (backing_base == nullptr || !impl || impl->MemoryFd() < 0 ||
+        impl->HostPageSize() != PageAlignment) {
+        return {0, 0};
+    }
+    const size_t pages = backing_size / PageAlignment;
+    std::vector<unsigned char> residency(pages);
+    if (mincore(backing_base, pages * PageAlignment, residency.data()) != 0) {
+        return {0, 0};
+    }
+    auto& seen = impl->zero_seen;
+    seen.resize((pages + 63) / 64);
+    const auto was_zero = [&seen](size_t page) { return (seen[page / 64] >> (page % 64)) & 1; };
+    const auto set_zero = [&seen](size_t page, bool zero) {
+        const u64 bit = u64{1} << (page % 64);
+        seen[page / 64] = zero ? (seen[page / 64] | bit) : (seen[page / 64] & ~bit);
+    };
+    const auto all_zero = [this](size_t first, size_t count) {
+        for (size_t page = first; page < first + count; ++page) {
+            if (!IsZeroPage(backing_base + page * PageAlignment)) {
+                return false;
+            }
+        }
+        return true;
+    };
+    // Short runs keep the time between the last check and the punch to microseconds
+    constexpr size_t MaxRun = 64;
+    size_t resident = 0;
+    size_t trimmed = 0;
+    size_t run_begin = 0;
+    size_t run_size = 0;
+    const auto flush = [&] {
+        if (run_size == 0) {
+            return;
+        }
+        if (all_zero(run_begin, run_size) &&
+            fallocate(impl->MemoryFd(), FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE,
+                      static_cast<off_t>(run_begin * PageAlignment),
+                      static_cast<off_t>(run_size * PageAlignment)) == 0) {
+            trimmed += run_size * PageAlignment;
+        }
+        for (size_t page = run_begin; page < run_begin + run_size; ++page) {
+            set_zero(page, false);
+        }
+        run_size = 0;
+    };
+    for (size_t page = 0; page < pages; ++page) {
+        if ((residency[page] & 1) == 0) {
+            set_zero(page, false);
+            continue;
+        }
+        resident += PageAlignment;
+        const bool zero = IsZeroPage(backing_base + page * PageAlignment);
+        if (!zero || !was_zero(page)) {
+            set_zero(page, zero);
+            flush();
+            continue;
+        }
+        if (run_size != 0 && run_begin + run_size != page) {
+            flush();
+        }
+        if (run_size == 0) {
+            run_begin = page;
+        }
+        if (++run_size == MaxRun) {
+            flush();
+        }
+    }
+    flush();
+    return {resident, trimmed};
 #else
     return {0, 0};
 #endif
