@@ -55,9 +55,8 @@ enum class Zone : u32 {
     ConfigureDraw,
     Record,         ///< Draw packets: stage B (GraphicsPipeline::Record), docs/nx2/cmdlist.md
     PacketGeometry, ///< Stage A reads the index, vertex and indirect buffers into the packet
-    PacketCapture,  ///< Stage A's descriptor capture and packet finish outside render targets
-    PacketBind,     ///< Stage B applies the packet's buffer bindings to the buffer cache
-    PacketEntries,  ///< Stage B adds the packet's descriptor entries
+    PacketCapture,  ///< Stage A's packet finish outside render targets
+    PacketEntries,  ///< Stage B's storage and texel buffer entries outside bind stage buffers
     DynamicState,
     DrawRecord,
     TextureUpload,
@@ -104,8 +103,8 @@ inline constexpr std::array<const char*, static_cast<size_t>(Zone::Count)> zone_
     "clear",         "compute",       "flush work",     "pipeline lookup", "configure",
     "sync descriptors", "read handles", "fill image views", "texture buffers", "update buffers",
     "descriptor acquire", "bind stage buffers", "push descriptors", "render targets",
-    "configure draw", "record", "packet geometry", "packet capture", "packet bind",
-    "packet entries", "dynamic state", "draw record", "texture upload", "fence",
+    "configure draw", "record", "packet geometry", "packet capture", "packet entries",
+    "dynamic state", "draw record", "texture upload", "fence",
     "fence skipped", "method", "split drain", "split wait",
     "writer wait", "list submit wait", "list GPU wait", "acquire poll", "resnapshot",
     "cb bind", "cb upload", "query report", "counter reset", "render enable", "sink",
@@ -146,7 +145,6 @@ inline constexpr auto stutter_categories = [] {
     set(Zone::TextureBuffers, Category::BufferCache);
     set(Zone::UpdateBuffers, Category::BufferCache);
     set(Zone::BindStageBuffers, Category::BufferCache);
-    set(Zone::PacketBind, Category::BufferCache);
     set(Zone::Fence, Category::QueryFence);
     set(Zone::ListSubmitWait, Category::QueryFence);
     set(Zone::ListGpuWait, Category::QueryFence);
