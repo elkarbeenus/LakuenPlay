@@ -123,6 +123,8 @@ add_library(video_core STATIC
     nx2_cmdpage_diag.h
     nx2_debug_control.cpp
     nx2_debug_control.h
+    nx2_back_stages.cpp
+    nx2_back_stages.h
     nx2_draw_stages.cpp
     nx2_draw_stages.h
     nx2_drain_check.h
