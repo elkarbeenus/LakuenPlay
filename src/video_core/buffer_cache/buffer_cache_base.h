@@ -50,6 +50,7 @@
 #include "video_core/gpu_wait_stats.h"
 #include "video_core/memory_manager.h"
 #include "video_core/nx2.h"
+#include "video_core/nx2_back_stages.h"
 #include "video_core/nx2_download_trace.h"
 #include "video_core/nx2_fast_draw.h"
 #include "video_core/nx2_read_trace.h"
@@ -165,6 +166,7 @@ struct GraphicsBufferPacket {
         indirect = false;
         buffers_uploaded = false;
         resolve_uniforms = false;
+        uniform_binds.clear();
     }
 
     bool is_indexed{};
@@ -203,6 +205,38 @@ struct GraphicsBufferPacket {
     bool buffers_uploaded{};
     /// OpenGL, which runs both stages in one: B resolves the uniform buffers with the others.
     bool resolve_uniforms{};
+
+    /// With stage B on its own thread, the uniform buffers A doesn't bind from the cache: those it
+    /// streamed (B binds the cached buffer instead when the range is GPU-modified) and those it
+    /// left to B, by their descriptor entry counted from the draw's first.
+    struct UniformBind {
+        u32 entry;
+        u32 size;
+        DAddr device_addr;
+        bool streamed;
+        bool native_bank; ///< A 64 KiB native program bank (uploaded again once per frame)
+    };
+    std::vector<UniformBind> uniform_binds;
+};
+
+/// The buffer cache's lock. Stage B (on its own thread, EDEN_NX2_BACK_STAGES=1) uses the cache
+/// under it: on the thread that draws, taking it first waits until B consumed every packet.
+class BufferCacheLock {
+public:
+    void lock() {
+        DrawStages::JoinB(DrawStages::Join::ABufferLock);
+        mutex.lock();
+    }
+    bool try_lock() {
+        DrawStages::JoinB(DrawStages::Join::ABufferLock);
+        return mutex.try_lock();
+    }
+    void unlock() {
+        mutex.unlock();
+    }
+
+private:
+    Common::SpinRecursiveMutex mutex;
 };
 
 template <typename Buffer>
@@ -451,6 +485,21 @@ public:
 
     void BindHostGraphicsUniformBuffers(size_t stage);
 
+    /// Stage A with stage B on its own thread: streams the small uniform buffers of `stage` as
+    /// BindHostGraphicsUniformBuffers does, and leaves the others to B in packet.uniform_binds,
+    /// without the cache's state (no buffer resolve, sync or upload).
+    void StageGraphicsUniformBuffers(size_t stage, GraphicsBufferPacket& packet);
+
+    /// Stage B: binds a uniform buffer A left in packet.uniform_binds through the runtime's
+    /// descriptor fill, or one A streamed whose range is GPU-modified now. False when A's stream
+    /// stands.
+    bool BindStagedUniformBuffer(const GraphicsBufferPacket::UniformBind& bind);
+
+    /// Stage B after a submit stage A didn't plan: binds the index and vertex buffers again.
+    void RebindGeometry() {
+        channel_state->vertex_rebind |= enabled_vertex_buffers_mask;
+    }
+
     /// Stage B: binds the packet's storage and texture buffers and resolves every buffer.
     void UpdateGraphicsBuffers(const GraphicsBufferPacket& packet);
 
@@ -661,7 +710,7 @@ public:
     /// nullptr.
     void BeginGraphicsUniforms(const Nx2FastDraw::Delta* delta);
 
-    Common::SpinRecursiveMutex mutex;
+    BufferCacheLock mutex;
     /// (this fork) Guest threads waiting to take `mutex` back after a read's download landed
     /// (FinishReadDownloads). The lock is unfair: the split's back takes it for every draw and
     /// took it again before a woken reader could, so a read of a few KiB waited up to 2-4 s on
