@@ -20,4 +20,14 @@ inline bool BuildsUnoptimized(VkDriverId driver_id, u64 shader_hash) {
            std::ranges::find(amd_proprietary, shader_hash) != amd_proprietary.end();
 }
 
+/// Task and mesh pipelines are built without the driver's optimizer on AMD (RADV, AMDVLK and AMD's
+/// own driver). Ocarina's foliage culling runs as task/mesh programs; on an RX 6600 XT under RADV
+/// they hung the GPU when the optimizer built them ("ring gfx timeout", then a GPU reset), and
+/// Hookshot found the same on these cards (NotRexed/Hookshot PR 430, issues 461 and 484).
+/// EDEN_NX2_AMD_MESH_OPT=1 (checked by the caller) builds them with the optimizer again.
+inline bool BuildsMeshUnoptimized(VkDriverId driver_id) {
+    return driver_id == VK_DRIVER_ID_MESA_RADV || driver_id == VK_DRIVER_ID_AMD_OPEN_SOURCE ||
+           driver_id == VK_DRIVER_ID_AMD_PROPRIETARY;
+}
+
 } // namespace Vulkan
