@@ -1059,7 +1059,10 @@ bool GraphicsPipeline::ConfigureImpl(DrawPacket& packet) {
         }
     }
 
-    buffer_cache.ReadGraphicsGeometry(packet.buffers);
+    {
+        Profile::Scope scope{Profile::Zone::PacketGeometry};
+        buffer_cache.ReadGraphicsGeometry(packet.buffers);
+    }
     {
         Profile::Scope scope{Profile::Zone::UpdateBuffers};
         buffer_cache.UpdateGraphicsUniformBuffers();
@@ -1172,7 +1175,10 @@ bool GraphicsPipeline::PrepareDelta(DrawPacket& packet) {
             }
         }
     }
-    buffer_cache.ReadGraphicsGeometry(packet.buffers);
+    {
+        Profile::Scope scope{Profile::Zone::PacketGeometry};
+        buffer_cache.ReadGraphicsGeometry(packet.buffers);
+    }
     {
         Profile::Scope scope{Profile::Zone::UpdateBuffers};
         buffer_cache.UpdateGraphicsUniformBuffers();
@@ -1255,6 +1261,7 @@ bool GraphicsPipeline::PrepareDelta(DrawPacket& packet) {
 }
 
 inline void GraphicsPipeline::BeginDescriptorCapture(DrawPacket& packet) {
+    VideoCommon::Nx2Profile::Scope scope{VideoCommon::Nx2Profile::Zone::PacketCapture};
     if (packet.entries.size() < num_descriptor_entries) {
         packet.entries.resize(num_descriptor_entries);
     }
@@ -1282,6 +1289,7 @@ void GraphicsPipeline::KeepImageDescriptors(size_t stage, const DrawPacket& pack
 void GraphicsPipeline::FinishPrepare(DrawPacket& packet,
                                      std::span<const VideoCommon::ImageViewInOut> views) {
     namespace Profile = VideoCommon::Nx2Profile;
+    Profile::Scope capture_scope{Profile::Zone::PacketCapture};
     const u32 mesh_first = CapturedEntries(packet);
     if (mesh_emulation) {
         guest_descriptor_queue.AddBuffer(mesh_output_buffer, mesh_output_offset, mesh_output_size);
@@ -1393,20 +1401,23 @@ bool GraphicsPipeline::Record(const DrawPacket& packet) {
             guest_descriptor_queue.AddEntries({packet.entries.data() + range.first, range.second});
         }
     };
-    for (size_t stage = 0; stage < NUM_STAGES; ++stage) {
-        if (((packet.stages >> stage) & 1) == 0) {
-            continue;
+    {
+        Profile::Scope entries_scope{Profile::Zone::PacketEntries};
+        for (size_t stage = 0; stage < NUM_STAGES; ++stage) {
+            if (((packet.stages >> stage) & 1) == 0) {
+                continue;
+            }
+            add_entries(packet.uniform_entries[stage]);
+            {
+                Profile::Scope scope{Profile::Zone::BindStageBuffers};
+                buffer_cache.BindHostStageBuffers(stage);
+            }
+            if (const auto [first, count] = packet.image_entries[stage]; count != 0) {
+                guest_descriptor_queue.AddEntries({packet.image_source + first, count});
+            }
         }
-        add_entries(packet.uniform_entries[stage]);
-        {
-            Profile::Scope scope{Profile::Zone::BindStageBuffers};
-            buffer_cache.BindHostStageBuffers(stage);
-        }
-        if (const auto [first, count] = packet.image_entries[stage]; count != 0) {
-            guest_descriptor_queue.AddEntries({packet.image_source + first, count});
-        }
+        add_entries(packet.mesh_entries);
     }
-    add_entries(packet.mesh_entries);
     if (packet.buffers.buffers_uploaded || buffer_cache.any_buffer_uploaded) {
         buffer_cache.runtime.PostCopyBarrier();
         buffer_cache.any_buffer_uploaded = false;
