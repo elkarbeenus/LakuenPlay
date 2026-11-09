@@ -284,6 +284,9 @@ public:
 
     /// Makes what was sent visible to the back.
     void Publish();
+    /// Stage B's thread (EDEN_NX2_BACK_STAGES=1) recorded the packets made before the back
+    /// consumed `position` (any thread, in order).
+    void NoteStageBConsumed(u64 position);
     /// The front waited for the back, which may run out of work soon: publish the next words
     /// after a few, as after a drain, not after PublishEvery.
     void PublishSoon() {
@@ -664,6 +667,8 @@ private:
     }
 
     void BackLoop(std::stop_token stop_token);
+    /// The back consumed the entries before `position`.
+    void StoreConsumed(u64 position);
     /// Runs the entry at `entry` (of the `words` published before the ring's end), returns its size.
     size_t Execute(const u64* entry, size_t words);
     /// The back, between entries: runs the tick hook if a thread asked for it.
