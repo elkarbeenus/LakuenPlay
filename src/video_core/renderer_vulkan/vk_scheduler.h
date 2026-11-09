@@ -29,6 +29,7 @@
 #include "common/settings.h"
 #include "video_core/gpu_split.h"
 #include "video_core/nx2_read_trace.h"
+#include "video_core/nx2_draw_stages.h"
 #include "video_core/renderer_vulkan/fragment_barrier_state.h"
 #include "video_core/renderer_vulkan/vk_master_semaphore.h"
 #include "video_core/vulkan_common/vulkan_wrapper.h"
@@ -163,6 +164,7 @@ public:
     }
 
     bool HasFragmentBarrier() const {
+        VideoCommon::DrawStages::CountInA(VideoCommon::DrawStages::Join::ASchedulerRead);
         return fragment_barrier.Pending();
     }
 
@@ -181,11 +183,13 @@ public:
 
     /// Returns true when a render pass is currently active in the scheduler state.
     bool IsRenderPassActive() const {
+        VideoCommon::DrawStages::CountInA(VideoCommon::DrawStages::Join::ASchedulerRead);
         return state.renderpass != VK_NULL_HANDLE;
     }
 
     /// Changes whenever a render pass begins or ends.
     u64 RenderPassSerial() const {
+        VideoCommon::DrawStages::CountInA(VideoCommon::DrawStages::Join::ASchedulerRead);
         return render_pass_serial;
     }
 
@@ -539,10 +543,12 @@ private:
                 return;
             }
             ++cmdlist_stats.full_joins;
+            VideoCommon::DrawStages::Count(VideoCommon::DrawStages::Join::AListFull);
             SpliceCommands();
             (void)command_list->Record(command);
             return;
         }
+        VideoCommon::DrawStages::Expect(VideoCommon::DrawStages::Stage::B, "Scheduler::Record");
         if (!chunk->Record(command)) {
             DispatchWork();
             (void)chunk->Record(command);
