@@ -376,6 +376,27 @@ Id CasFunction(EmitContext& ctx, Operation operation, Id value_type) {
     return func;
 }
 
+// A ceiling on a compare-exchange loop's attempts. Each failed attempt means another invocation's
+// succeeded, so a contended word is written in far fewer tries; the ceiling matters only when the
+// exchange never returns what it was given, as for a word out of bounds under robust buffer access:
+// the loop then spun forever and the GPU hung (ring gfx timeout, a full reset on AMD). From
+// NotRexed/Hookshot (#548, 40c0042), whose shader recompiler is Eden's as well.
+constexpr u32 CAS_LOOP_MAX_TRIES = 1024;
+
+Id CasTriesVariable(EmitContext& ctx) {
+    const Id tries_var{ctx.AddLocalVariable(ctx.TypePointer(spv::StorageClass::Function, ctx.U32[1]),
+                                            spv::StorageClass::Function)};
+    ctx.OpStore(tries_var, ctx.u32_zero_value);
+    return tries_var;
+}
+
+Id CasLoopDone(EmitContext& ctx, Id tries_var, Id success) {
+    const Id tries{ctx.OpIAdd(ctx.U32[1], ctx.OpLoad(ctx.U32[1], tries_var), ctx.Const(1U))};
+    ctx.OpStore(tries_var, tries);
+    return ctx.OpLogicalOr(ctx.U1, success,
+                           ctx.OpUGreaterThanEqual(ctx.U1, tries, ctx.Const(CAS_LOOP_MAX_TRIES)));
+}
+
 Id CasLoop(EmitContext& ctx, Operation operation, Id array_pointer, Id element_pointer,
            Id value_type, spv::Scope scope) {
     const bool is_shared{scope == spv::Scope::Workgroup};
@@ -400,6 +421,8 @@ Id CasLoop(EmitContext& ctx, Operation operation, Id array_pointer, Id element_p
     // keep returning a stale copy (AMD), and the invocations that lost would never match again.
     const Id expected_var{ctx.AddLocalVariable(
         ctx.TypePointer(spv::StorageClass::Function, ctx.U32[1]), spv::StorageClass::Function)};
+    // (the attempt count's variable next: a function's OpVariables come before other instructions)
+    const Id tries_var{CasTriesVariable(ctx)};
     const Id word_pointer{is_struct ? ctx.OpAccessChain(element_pointer, base, zero, index)
                                     : ctx.OpAccessChain(element_pointer, base, index)};
     ctx.OpStore(expected_var, ctx.OpLoad(ctx.U32[1], word_pointer));
@@ -428,7 +451,7 @@ Id CasLoop(EmitContext& ctx, Operation operation, Id array_pointer, Id element_p
                                                     new_word, expected)};
     ctx.OpStore(expected_var, atomic_res);
     const Id success{ctx.OpIEqual(ctx.U1, atomic_res, expected)};
-    ctx.OpBranchConditional(success, merge_block, loop_header);
+    ctx.OpBranchConditional(CasLoopDone(ctx, tries_var, success), merge_block, loop_header);
 
     ctx.AddLabel(merge_block);
     ctx.OpReturnValue(from_word(atomic_res));
@@ -677,6 +700,7 @@ void EmitContext::DefineSharedMemory(const IR::Program& program) {
         AddLabel();
         const Id expected_var{AddLocalVariable(TypePointer(spv::StorageClass::Function, U32[1]),
                                                spv::StorageClass::Function)};
+        const Id tries_var{CasTriesVariable(*this)};
         const Id word_offset{OpShiftRightArithmetic(U32[1], offset, Const(2U))};
         const Id shift_offset{OpShiftLeftLogical(U32[1], offset, Const(3U))};
         const Id bit_offset{OpBitwiseAnd(U32[1], shift_offset, Const(mask))};
@@ -696,7 +720,7 @@ void EmitContext::DefineSharedMemory(const IR::Program& program) {
                                                     u32_zero_value, new_value, old_value)};
         OpStore(expected_var, atomic_res);
         const Id success{OpIEqual(U1, atomic_res, old_value)};
-        OpBranchConditional(success, merge_block, loop_header);
+        OpBranchConditional(CasLoopDone(*this, tries_var, success), merge_block, loop_header);
 
         AddLabel(merge_block);
         OpReturn();
@@ -931,6 +955,7 @@ void EmitContext::DefineWriteStorageCasLoopFunction(const Info& info) {
     // Each attempt expects the word the previous compare-exchange returned (see CasLoop).
     const Id expected_var{
         AddLocalVariable(TypePointer(spv::StorageClass::Function, U32[1]), spv::StorageClass::Function)};
+    const Id tries_var{CasTriesVariable(*this)};
     OpStore(expected_var, OpLoad(U32[1], pointer));
     const Id scope_device{Const(1u)};
     const Id ordering_relaxed{u32_zero_value};
@@ -951,7 +976,8 @@ void EmitContext::DefineWriteStorageCasLoopFunction(const Info& info) {
                                                   ordering_relaxed, desired_value, expected_value)};
     OpStore(expected_var, actual_value);
     const Id store_successful{OpIEqual(U1, expected_value, actual_value)};
-    OpBranchConditional(store_successful, endloop_label, continue_label);
+    OpBranchConditional(CasLoopDone(*this, tries_var, store_successful), endloop_label,
+                        continue_label);
 
     AddLabel(endloop_label);
     OpReturn();
