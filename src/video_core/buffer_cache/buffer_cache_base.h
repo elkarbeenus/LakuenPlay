@@ -10,6 +10,7 @@
 #include <atomic>
 #include <cstdlib>
 #include <array>
+#include <atomic>
 #include <bit>
 #include <bitset>
 #include <chrono>
@@ -970,7 +971,8 @@ private:
     };
     std::array<GeometrySync, NUM_VERTEX_BUFFERS + 1> geometry_syncs{};
     /// Counts DeleteBuffer calls: a buffer id older than this count may have been freed or reused.
-    u64 buffer_deletions = 0;
+    /// Read by stage A without the lock while stage B deletes buffers on its own thread.
+    std::atomic<u64> buffer_deletions{};
 
     /// The last index buffer UpdateIndexBuffer resolved, and what it depends on.
     struct IndexBufferMemo {
