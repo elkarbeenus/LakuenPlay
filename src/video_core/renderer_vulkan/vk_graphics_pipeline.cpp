@@ -19,6 +19,7 @@
 
 #include "video_core/renderer_vulkan/pipeline_build_trace.h"
 #include "video_core/renderer_vulkan/pipeline_helper.h"
+#include "video_core/renderer_vulkan/pipeline_optimization.h"
 
 #include "common/bit_field.h"
 #include "common/scope_exit.h"
@@ -2022,6 +2023,19 @@ void GraphicsPipeline::MakePipeline(VkRenderPass render_pass) {
     }
     if (uses_descriptor_buffer) {
         flags |= VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT;
+    }
+    // Task/mesh pipelines on AMD without the driver's optimizer: they hung the GPU otherwise
+    // (pipeline_optimization.h). EDEN_NX2_AMD_MESH_OPT=1: with it, as on other GPUs.
+    if (is_mesh && BuildsMeshUnoptimized(device.GetDriverID())) {
+        static const bool mesh_opt = std::getenv("EDEN_NX2_AMD_MESH_OPT") != nullptr;
+        if (!mesh_opt) {
+            flags |= VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT;
+            static std::atomic<bool> logged{false};
+            if (!logged.exchange(true)) {
+                LOG_INFO(Render_Vulkan, "Task/mesh pipelines are built without the driver's "
+                                        "optimizer on AMD (EDEN_NX2_AMD_MESH_OPT=1: with it)");
+            }
+        }
     }
 
     const bool unoptimized = (flags & VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT) != 0;
