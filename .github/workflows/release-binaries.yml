@@ -7,6 +7,13 @@ on:
         description: Publish the binaries as a GitHub release
         type: boolean
         default: true
+      pgo_mode:
+        description: "PGO build (Linux): use = with the profile (oot-linux.profdata if present), generate = an instrumented build that records a profile to /home/deck/lichii-pgo"
+        type: choice
+        options:
+          - use
+          - generate
+        default: use
   push:
     branches:
       - nx2-experimental
@@ -163,8 +170,29 @@ jobs:
             sudo tee /etc/apt/sources.list.d/llvm.list > /dev/null
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            "clang-$PGO_LLVM_VERSION" "lld-$PGO_LLVM_VERSION"
+            "clang-$PGO_LLVM_VERSION" "lld-$PGO_LLVM_VERSION" "llvm-$PGO_LLVM_VERSION"
           "clang-$PGO_LLVM_VERSION" --version
+
+      # (this fork) Raw profiles recorded with an instrumented build (pgo_mode generate) are kept
+      # in pgo/ as .profraw.zst; they are merged into oot-linux.profdata, which the Linux PGO
+      # build then uses in place of eglantine.profdata.
+      - name: Merge the Ocarina of Time profile
+        if: startsWith(matrix.platform, 'linux') && matrix.pgo && inputs.pgo_mode != 'generate'
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          raw=(pgo/*.profraw.zst)
+          if [ ${#raw[@]} -eq 0 ]; then
+            echo "No raw profiles in pgo/: eglantine.profdata"
+            exit 0
+          fi
+          mkdir -p "$RUNNER_TEMP/profraw"
+          for f in "${raw[@]}"; do
+            zstd -d -q -f "$f" -o "$RUNNER_TEMP/profraw/$(basename "${f%.zst}")"
+          done
+          "llvm-profdata-$PGO_LLVM_VERSION" merge -o oot-linux.profdata "$RUNNER_TEMP"/profraw/*.profraw
+          "llvm-profdata-$PGO_LLVM_VERSION" show oot-linux.profdata | tail -3
 
       # The profiles are in the source tree, where the Linux and Windows configure steps read them.
       - name: Check PGO profile
@@ -172,6 +200,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [ '${{ inputs.pgo_mode }}' = 'generate' ] && [ -z '${{ matrix.profile }}' ]; then
+            echo "Instrumented build: no profile read"
+            exit 0
+          fi
           test -s "${{ matrix.profile || 'eglantine.profdata' }}"
 
       - name: Set up MSVC
@@ -238,10 +270,10 @@ jobs:
             .sccache
           # The profile's hash is part of the key, so objects built against an older profile are
           # never restored.
-          key: objects-${{ matrix.platform }}${{ matrix.profile && format('-{0}', hashFiles(matrix.profile)) || '' }}-v2-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: objects-${{ matrix.platform }}${{ (matrix.pgo && inputs.pgo_mode == 'generate') && '-instrumented' || '' }}${{ matrix.profile && format('-{0}', hashFiles(matrix.profile)) || '' }}-v2-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            objects-${{ matrix.platform }}${{ matrix.profile && format('-{0}', hashFiles(matrix.profile)) || '' }}-v2-${{ github.sha }}-
-            objects-${{ matrix.platform }}${{ matrix.profile && format('-{0}', hashFiles(matrix.profile)) || '' }}-v2-
+            objects-${{ matrix.platform }}${{ (matrix.pgo && inputs.pgo_mode == 'generate') && '-instrumented' || '' }}${{ matrix.profile && format('-{0}', hashFiles(matrix.profile)) || '' }}-v2-${{ github.sha }}-
+            objects-${{ matrix.platform }}${{ (matrix.pgo && inputs.pgo_mode == 'generate') && '-instrumented' || '' }}${{ matrix.profile && format('-{0}', hashFiles(matrix.profile)) || '' }}-v2-
 
       - name: Configure Linux
         if: startsWith(matrix.platform, 'linux')
@@ -267,13 +299,24 @@ jobs:
             -DUSE_CCACHE=ON
           )
           if [ '${{ matrix.pgo }}' = 'true' ]; then
-            # Same flags Eden's CI passes for its clang PGO build.
-            profile="-fprofile-use=$PWD/eglantine.profdata -Wno-backend-plugin \
-              -Wno-profile-instr-unprofiled -Wno-profile-instr-out-of-date"
+            # Same flags Eden's CI passes for its clang PGO build. (this fork) The Ocarina profile
+            # when one was merged; generate: instrumented, writing raw profiles on a clean exit.
+            linker="-B/usr/lib/llvm-$PGO_LLVM_VERSION/bin -fuse-ld=lld"
+            if [ '${{ inputs.pgo_mode }}' = 'generate' ]; then
+              profile="-fprofile-generate=/home/deck/lichii-pgo -Wno-backend-plugin"
+              linker+=" -fprofile-generate=/home/deck/lichii-pgo"
+              echo "PGO: instrumented build (profiles to /home/deck/lichii-pgo)"
+            else
+              profdata=eglantine.profdata
+              [ -s oot-linux.profdata ] && profdata=oot-linux.profdata
+              echo "PGO profile: $profdata"
+              profile="-fprofile-use=$PWD/$profdata -Wno-backend-plugin \
+                -Wno-profile-instr-unprofiled -Wno-profile-instr-out-of-date"
+            fi
             flags+=(
               "-DCMAKE_C_COMPILER=clang-$PGO_LLVM_VERSION"
               "-DCMAKE_CXX_COMPILER=clang++-$PGO_LLVM_VERSION"
-              "-DCMAKE_EXE_LINKER_FLAGS=-B/usr/lib/llvm-$PGO_LLVM_VERSION/bin -fuse-ld=lld"
+              "-DCMAKE_EXE_LINKER_FLAGS=$linker"
               "-DCMAKE_C_FLAGS=$profile"
               "-DCMAKE_CXX_FLAGS=$profile"
             )
@@ -563,7 +606,7 @@ jobs:
         if: startsWith(matrix.platform, 'windows')
         uses: actions/upload-artifact@v7
         with:
-          name: lichii-${{ matrix.platform }}-${{ github.sha }}
+          name: lichii-${{ matrix.platform }}${{ (matrix.pgo && inputs.pgo_mode == 'generate') && '-instrumented' || '' }}-${{ github.sha }}
           path: build/release/bin/
           if-no-files-found: error
           retention-days: 7
@@ -573,7 +616,7 @@ jobs:
         if: startsWith(matrix.platform, 'linux')
         uses: actions/upload-artifact@v7
         with:
-          name: lichii-${{ matrix.platform }}-${{ github.sha }}
+          name: lichii-${{ matrix.platform }}${{ (matrix.pgo && inputs.pgo_mode == 'generate') && '-instrumented' || '' }}-${{ github.sha }}
           path: |
             lichii-${{ github.sha }}-${{ matrix.platform }}.tar.gz
             lichii-${{ github.sha }}-${{ matrix.platform }}.AppImage
@@ -586,7 +629,7 @@ jobs:
         if: startsWith(matrix.platform, 'macos')
         uses: actions/upload-artifact@v7
         with:
-          name: lichii-${{ matrix.platform }}-${{ github.sha }}
+          name: lichii-${{ matrix.platform }}${{ (matrix.pgo && inputs.pgo_mode == 'generate') && '-instrumented' || '' }}-${{ github.sha }}
           path: |
             lichii-${{ github.sha }}-${{ matrix.platform }}.zip
             lichii-${{ github.sha }}-${{ matrix.platform }}.dmg
