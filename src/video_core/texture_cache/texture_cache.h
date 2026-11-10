@@ -16,6 +16,7 @@
 #include <bit>
 #include <string>
 #include <utility>
+#include "common/memory_detect.h"
 #include "common/container/unordered_map.h"
 #include <boost/container/small_vector.hpp>
 
@@ -339,6 +340,18 @@ void TextureCache<P>::ApplyThresholdOverrides(bool log) {
     u64 max_critical = MaxCriticalMemory;
     if constexpr (requires { runtime.GetDeviceMemoryBudget(); }) {
         max_critical = (std::max)(max_critical, runtime.GetDeviceMemoryBudget() / 8 * 5);
+    }
+    // (this fork) On a PC with 16 GB of RAM or less the cache stops at 3.5 GiB: what a card's
+    // VRAM can't hold the driver keeps in system RAM, and with ~6 GB of guest memory resident
+    // a 5 GiB cache plus a browser ran the PC out of memory and the kernel ended the emulator.
+    // EDEN_NX2_TC_LOW_RAM=0 keeps the larger cap.
+    static const bool low_ram = [] {
+        const char* value = std::getenv("EDEN_NX2_TC_LOW_RAM");
+        return (value == nullptr || value[0] != '0') &&
+               Common::GetMemInfo().TotalPhysicalMemory <= (u64{17} << 30);
+    }();
+    if (low_ram) {
+        max_critical = (std::min)(max_critical, u64{3584_MiB});
     }
     critical_memory = (std::min)(critical_memory, max_critical);
     expected_memory =
