@@ -1085,13 +1085,13 @@ bool KeplerCompute::BypassOotNetwork(u64 program_id, u64 native_key) {
     if (native_key != OutputProgramKey) {
         return false;
     }
-    // The copy needs the tonemapped image to be a B10G11R11 block-linear image of the output's size.
+    // The copy needs the tonemapped image to be a B10G11R11 block-linear image.
     const auto output = ConstBuffer0Image(OutputImageHandleOffset);
     if (!output || output->format != Texture::TextureFormat::B10G11R11 || output->Address() == 0 ||
         output->Address() == tonemapped.Address() || !output->IsBlockLinear() ||
         tonemapped.format != Tegra::RenderTargetFormat::B10G11R11_FLOAT ||
-        tonemapped.tile_mode.is_pitch_linear || tonemapped.width != output->Width() ||
-        tonemapped.height != output->Height()) {
+        tonemapped.tile_mode.is_pitch_linear || output->Width() == 0 || output->Height() == 0 ||
+        tonemapped.width == 0 || tonemapped.height == 0) {
         bypass->output_replaced.store(false, std::memory_order_relaxed);
         static bool warned = false;
         if (!std::exchange(warned, true)) {
@@ -1115,35 +1115,44 @@ bool KeplerCompute::BypassOotNetwork(u64 program_id, u64 native_key) {
     destination.height = output->Height();
     destination.addr_upper = static_cast<u32>(output->Address() >> 32);
     destination.addr_lower = static_cast<u32>(output->Address());
-    Fermi2D::Surface source = destination;
+    Fermi2D::Surface source{};
+    source.format = Tegra::RenderTargetFormat::B10G11R11_FLOAT;
+    source.linear = Fermi2D::MemoryLayout::BlockLinear;
     source.block_width.Assign(tonemapped.tile_mode.block_width);
     source.block_height.Assign(tonemapped.tile_mode.block_height);
     source.block_depth.Assign(tonemapped.tile_mode.block_depth);
+    source.depth = 1;
+    source.width = tonemapped.width;
+    source.height = tonemapped.height;
     source.addr_upper = tonemapped.address_high;
     source.addr_lower = tonemapped.address_low;
-    const s32 width = static_cast<s32>(output->Width());
-    const s32 height = static_cast<s32>(output->Height());
+    const s32 dst_width = static_cast<s32>(output->Width());
+    const s32 dst_height = static_cast<s32>(output->Height());
+    const s32 src_width = static_cast<s32>(tonemapped.width);
+    const s32 src_height = static_cast<s32>(tonemapped.height);
+    const bool is_scaling = (src_width != dst_width || src_height != dst_height);
     const Fermi2D::Config config{
         .operation = Fermi2D::Operation::SrcCopy,
-        .filter = Fermi2D::Filter::Point,
+        .filter = is_scaling ? Fermi2D::Filter::Bilinear : Fermi2D::Filter::Point,
         .must_accelerate = true,
         .dst_x0 = 0,
         .dst_y0 = 0,
-        .dst_x1 = width,
-        .dst_y1 = height,
+        .dst_x1 = dst_width,
+        .dst_y1 = dst_height,
         .src_x0 = 0,
         .src_y0 = 0,
-        .src_x1 = width,
-        .src_y1 = height,
+        .src_x1 = src_width,
+        .src_y1 = src_height,
     };
     const bool copied = rasterizer->AccelerateSurfaceCopy(source, destination, config);
     bypass->output_replaced.store(copied, std::memory_order_relaxed);
     static bool logged = false;
     if (!std::exchange(logged, true)) {
         LOG_INFO(HW_GPU,
-                 "Ocarina of Time: anti-aliasing network bypassed ({}): {:#x} -> {:#x} {}x{}",
-                 copied ? "copy of the tonemapped image" : "copy failed", tonemapped.Address(),
-                 output->Address(), width, height);
+                 "Ocarina of Time: anti-aliasing network bypassed ({}): {:#x} ({}x{}) -> {:#x} ({}x{})",
+                 copied ? (is_scaling ? "bilinear blit of tonemapped image" : "copy of the tonemapped image")
+                        : "copy failed",
+                 tonemapped.Address(), src_width, src_height, output->Address(), dst_width, dst_height);
     }
     return copied;
 }
