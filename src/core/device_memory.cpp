@@ -82,8 +82,15 @@ void DeviceMemory::TrimZeroPages(std::stop_token stop) {
         const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                             std::chrono::steady_clock::now() - start)
                             .count();
+        // A pass that trims little backs off to 5 minutes, not 1 (Fritchii v5.7, 6a29460f5b):
+        // after boot most passes free next to nothing for up to ~1 s of page reads and punches
+        // that share the address space with the game. EDEN_NX2_ZERO_TRIM_IDLE=0: 60 s as before.
+        static const std::chrono::seconds max_interval = [] {
+            const char* const value = std::getenv("EDEN_NX2_ZERO_TRIM_IDLE");
+            return std::chrono::seconds{value != nullptr && value[0] == '0' ? 60 : 300};
+        }();
         if (trimmed < Busy) {
-            interval = (std::min)(interval * 2, std::chrono::seconds{60});
+            interval = (std::min)(interval * 2, max_interval);
             continue;
         }
         interval = 5s;
