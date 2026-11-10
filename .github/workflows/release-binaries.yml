@@ -311,6 +311,9 @@ jobs:
             -DLICHII_BUILD_PLATFORM=${{ matrix.platform }}
             -DUSE_DISCORD_PRESENCE=OFF
             -DUSE_CCACHE=ON
+            # (this fork, handheld branch) Zen 2 code: the Steam Deck is Zen 2, the Legion Go S
+            # (Z2 Go) Zen 3+; both run it. Not for older CPUs.
+            -DYUZU_BUILD_PRESET=zen2
           )
           if [ '${{ matrix.pgo }}' = 'true' ]; then
             # Same flags Eden's CI passes for its clang PGO build. (this fork) The Ocarina profile
