@@ -898,6 +898,7 @@ void BufferCache<P>::FinishReadDownloads(DAddr device_addr, u64 size) {
             lock.unlock();
             runtime.WaitForHostRead(*tick);
             trace_now(&ReadTrace::Read::woke);
+            readers_waiting.fetch_add(1, std::memory_order_acq_rel);
             if constexpr (HAS_READ_TRACE) {
                 if (gpu_side) [[unlikely]] {
                     ReadTrace::Count(ReadTrace::g_early.gpu_side_waits);
@@ -906,6 +907,7 @@ void BufferCache<P>::FinishReadDownloads(DAddr device_addr, u64 size) {
                 }
             }
             lock.lock();
+            readers_waiting.fetch_sub(1, std::memory_order_acq_rel);
         } else {
             trace_now(&ReadTrace::Read::woke);
         }
