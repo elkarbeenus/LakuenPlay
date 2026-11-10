@@ -49,7 +49,7 @@ permissions:
 env:
   PGO_LLVM_VERSION: "23"
   # File and artifact name of this OoT build (no umlaut in file names).
-  APP_LABEL: LakuenPlay-OoT-PC
+  APP_LABEL: LakuenPlay-OoT-Handheld
 
 # A running build is never cancelled: it finishes and publishes. A push meanwhile queues one build;
 # a later push replaces it, so the newest commit builds as soon as the running one is done.

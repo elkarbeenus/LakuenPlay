@@ -67,7 +67,16 @@ void DeviceMemory::TrimZeroPages(std::stop_token stop) {
         const auto start = std::chrono::steady_clock::now();
         const auto [resident, trimmed] = buffer.TrimZeroPages();
 #if defined(__linux__) && defined(__GLIBC__)
-        malloc_trim(0);
+        // malloc_trim walks and locks every heap arena; on a Steam Deck a pass coincided with a
+        // ~300-390 ms hitch about once a minute. EDEN_NX2_MALLOC_TRIM=0 skips it once the
+        // zero-page passes have backed off (nothing left to trim), keeping it during boot.
+        static const bool always_malloc_trim = [] {
+            const char* value = std::getenv("EDEN_NX2_MALLOC_TRIM");
+            return value == nullptr || value[0] != '0';
+        }();
+        if (always_malloc_trim || trimmed >= Busy) {
+            malloc_trim(0);
+        }
 #endif
         const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                             std::chrono::steady_clock::now() - start)
