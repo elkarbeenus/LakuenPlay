@@ -178,6 +178,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             "clang-$PGO_LLVM_VERSION" "lld-$PGO_LLVM_VERSION" "llvm-$PGO_LLVM_VERSION"
+          # The instrumented build links clang's profile runtime (libclang_rt.profile.a).
+          if [ '${{ inputs.pgo_mode }}' = 'generate' ]; then
+            sudo apt-get install -y --no-install-recommends "libclang-rt-$PGO_LLVM_VERSION-dev"
+          fi
           "clang-$PGO_LLVM_VERSION" --version
 
       # (this fork) Raw profiles recorded with an instrumented build (pgo_mode generate) are kept
