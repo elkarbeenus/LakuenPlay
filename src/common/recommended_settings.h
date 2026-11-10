@@ -51,7 +51,8 @@ void ForEachRecommendedSetting(Values& values, Func&& func) {
     entry(values.use_vulkan_driver_pipeline_cache, true);
     entry(values.native_async_draws, NativeAsyncDraws::Bounded);
     entry(values.native_pipeline_wait_ms, 8);
-    entry(values.precache_shaders, PrecacheShaders::Off);
+    // (this fork) Handhelds build the whole cache on the loading screen once, as the owner plays.
+    entry(values.precache_shaders, handheld ? PrecacheShaders::Always : PrecacheShaders::Off);
     entry(values.use_video_framerate, false);
     entry(values.mkw_30fps, false);
     entry(values.mkw_dynamic_fps, false);
