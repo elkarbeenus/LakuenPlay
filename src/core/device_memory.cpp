@@ -56,14 +56,35 @@ void DeviceMemory::TrimZeroPages(std::stop_token stop) {
     std::mutex mutex;
     std::condition_variable_any wake;
     std::chrono::seconds interval = 5s;
+    // (this fork) An area change fills memory fast (the kernel zero-fills new pages as the game
+    // touches them): when 256 MiB more were filled since the last pass, the next pass comes
+    // after 5 s instead of after the backed-off interval (up to 5 minutes), so memory is handed
+    // back while it matters. EDEN_NX2_ZERO_TRIM_AREA=0: wait the interval as before.
+    static const bool area_wake = [] {
+        const char* value = std::getenv("EDEN_NX2_ZERO_TRIM_AREA");
+        return value == nullptr || value[0] != '0';
+    }();
+    constexpr u64 AreaFillBytes = u64{256} << 20;
+    u64 filled_at_pass = Common::HostMemory::ZeroFilledBytes();
     while (true) {
-        {
-            std::unique_lock lock{mutex};
-            wake.wait_for(lock, stop, interval, [] { return false; });
+        for (auto waited = std::chrono::seconds{0}; waited < interval; waited += 5s) {
+            {
+                std::unique_lock lock{mutex};
+                wake.wait_for(lock, stop, (std::min)(std::chrono::seconds{5}, interval - waited),
+                              [] { return false; });
+            }
+            if (stop.stop_requested()) {
+                return;
+            }
+            if (area_wake &&
+                Common::HostMemory::ZeroFilledBytes() - filled_at_pass >= AreaFillBytes) {
+                break;
+            }
         }
         if (stop.stop_requested()) {
             return;
         }
+        filled_at_pass = Common::HostMemory::ZeroFilledBytes();
         const auto start = std::chrono::steady_clock::now();
         const auto [resident, trimmed] = buffer.TrimZeroPages();
 #if defined(__linux__) && defined(__GLIBC__)
