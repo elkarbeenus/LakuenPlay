@@ -8,6 +8,7 @@
 #undef VMA_IMPLEMENTATION
 #endif
 
+#include <cstdlib>
 #include <QSysInfo>
 #include <boost/algorithm/string/split.hpp>
 #include "common/fs/path_util.h"
@@ -1361,7 +1362,22 @@ void MainWindow::LinkActionShortcut(QAction* action, const QString& action_name,
         hotkey_registry.GetControllerHotkey(main_window, action_name.toStdString(), controller);
     connect(
         controller_hotkey, &ControllerShortcut::Activated, this,
-        [action, tas_allowed, this] {
+        [action, action_name, tas_allowed, this] {
+            // (this fork) Exit and Stop no longer come from controller hotkeys: Home+Minus fires
+            // when the Guide/Steam button is held for a Steam Input chord while Minus is down,
+            // and opened "close Lichii?" mid-game. The keyboard shortcuts stay.
+            // EDEN_NX2_CONTROLLER_EXIT=1 restores them.
+            static const bool controller_exit = [] {
+                const char* value = std::getenv("EDEN_NX2_CONTROLLER_EXIT");
+                return value != nullptr && value[0] == '1';
+            }();
+            if (!controller_exit && (action_name == QStringLiteral("Exit Eglantine") ||
+                                     action_name == QStringLiteral("Stop Emulation"))) {
+                LOG_WARNING(Frontend, "Controller hotkey for '{}' ignored "
+                                      "(EDEN_NX2_CONTROLLER_EXIT=1 allows it)",
+                            action_name.toStdString());
+                return;
+            }
             auto [tas_status, current_tas_frame, total_tas_frames] =
                 input_subsystem->GetTas()->GetStatus();
             if (tas_allowed || tas_status == InputCommon::TasInput::TasState::Stopped) {
@@ -1940,6 +1956,7 @@ void MainWindow::HandleSigInterrupt(int sig) {
 
 void MainWindow::OnSigInterruptNotifierActivated() {
     sig_interrupt_notifier->setEnabled(false);
+    LOG_WARNING(Frontend, "SIGTERM received from outside: asking to close");
 
     char a;
     int ret = read(sig_interrupt_fds[1], &a, sizeof(a));
@@ -5789,6 +5806,7 @@ bool MainWindow::SelectRomFSDumpTarget(const FileSys::ContentProvider& installed
 }
 
 bool MainWindow::ConfirmClose() {
+    LOG_INFO(Frontend, "Close requested (window close, Exit action or SIGTERM)");
     if (QtCommon::emu_thread == nullptr ||
         UISettings::values.confirm_before_stopping.GetValue() == ConfirmStop::Ask_Never)
         return true;
