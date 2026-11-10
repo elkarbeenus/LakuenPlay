@@ -52,7 +52,9 @@ Each build ships as a self-contained **AppImage** in two variants:
 - **PGO** (recommended): the same program compiled with profile-guided optimization, using a profile recorded on the target hardware.
 - **Standard**: no profile, for comparison or if the PGO build misbehaves.
 
-Builds are produced by [GitHub Actions](../../actions/workflows/release-binaries.yml). Every run is titled with what it contains. Download the artifact of the newest successful run (needs a GitHub login), or use the [Releases](../../releases) page once releases are published.
+**⬇️ Latest release: [LaküenPlay v1.0 – PC](../../releases/tag/v1.0)** (`LakuenPlay-v1.0-PC-x86_64-pgo.AppImage` is recommended). The handheld build is still in testing.
+
+Test builds are produced by [GitHub Actions](../../actions/workflows/release-binaries.yml), and every run is titled with what it contains. Downloading an artifact needs a GitHub login.
 
 ## What changed since Lichii build 130
 
