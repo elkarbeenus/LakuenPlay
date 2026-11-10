@@ -1171,6 +1171,9 @@ VkFormat Device::GetSupportedFormat(VkFormat wanted_format, VkFormatFeatureFlags
 void Device::ReportLoss() const {
     LOG_CRITICAL(Render_Vulkan, "Device loss occurred!");
     ReportDeviceFault();
+    // (this fork) Flush now: the process usually ends right after, and the lines above stayed in
+    // the logger's buffer (logs ended mid-line with no word of the loss).
+    Common::Log::Stop();
 
     // Wait for the log to flush and for Nsight Aftermath to dump the results
     std::this_thread::sleep_for(std::chrono::seconds{15});
