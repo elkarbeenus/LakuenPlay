@@ -185,7 +185,7 @@ jobs:
           "clang-$PGO_LLVM_VERSION" --version
 
       # (this fork) Raw profiles recorded with an instrumented build (pgo_mode generate) are kept
-      # in pgo/ as .profraw.zst; they are merged into oot-linux.profdata, which the Linux PGO
+      # in pgo/ as .profraw.zst or .profraw.xz; they are merged into oot-linux.profdata, which the Linux PGO
       # build then uses in place of eglantine.profdata.
       - name: Merge the Ocarina of Time profile
         if: startsWith(matrix.platform, 'linux') && matrix.pgo && inputs.pgo_mode != 'generate'
@@ -193,14 +193,17 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          raw=(pgo/*.profraw.zst)
+          raw=(pgo/*.profraw.zst pgo/*.profraw.xz)
           if [ ${#raw[@]} -eq 0 ]; then
             echo "No raw profiles in pgo/: eglantine.profdata"
             exit 0
           fi
           mkdir -p "$RUNNER_TEMP/profraw"
           for f in "${raw[@]}"; do
-            zstd -d -q -f "$f" -o "$RUNNER_TEMP/profraw/$(basename "${f%.zst}")"
+            case "$f" in
+              *.zst) zstd -d -q -f "$f" -o "$RUNNER_TEMP/profraw/$(basename "${f%.zst}")" ;;
+              *.xz) xz -d -c "$f" > "$RUNNER_TEMP/profraw/$(basename "${f%.xz}")" ;;
+            esac
           done
           "llvm-profdata-$PGO_LLVM_VERSION" merge -o oot-linux.profdata "$RUNNER_TEMP"/profraw/*.profraw
           "llvm-profdata-$PGO_LLVM_VERSION" show oot-linux.profdata | tail -3
