@@ -1865,9 +1865,35 @@ void MainWindow::OnPrepareForSleep(bool prepare_sleep) {
 #ifdef __unix__
 std::array<int, 3> MainWindow::sig_interrupt_fds{0, 0, 0};
 
+namespace {
+// (this fork) A crash used to lose the last seconds of the log: they were still in the logger's
+// buffer, so a log ended mid-line with nothing about why. On a fatal signal the log now says
+// which one and is flushed, then the default action (core dump) runs as before. Installed
+// before the JIT's own SIGSEGV handler, which passes faults outside guest code on to this one.
+void HandleFatalSignal(int sig) {
+    LOG_CRITICAL(Frontend, "Fatal signal {} ({}): the emulator is crashing", sig,
+                 sig == SIGSEGV   ? "SIGSEGV, invalid memory access"
+                 : sig == SIGABRT ? "SIGABRT, abort (unhandled exception or failed check)"
+                 : sig == SIGBUS  ? "SIGBUS"
+                 : sig == SIGILL  ? "SIGILL"
+                 : sig == SIGFPE  ? "SIGFPE"
+                                  : "other");
+    Common::Log::Stop();
+    std::signal(sig, SIG_DFL);
+    std::raise(sig);
+}
+} // Anonymous namespace
+
 void MainWindow::SetupSigInterrupts() {
     if (sig_interrupt_fds[2] == 1) {
         return;
+    }
+    for (const int sig : {SIGSEGV, SIGABRT, SIGBUS, SIGILL, SIGFPE}) {
+        struct sigaction fatal{};
+        fatal.sa_handler = &HandleFatalSignal;
+        sigemptyset(&fatal.sa_mask);
+        fatal.sa_flags = SA_RESETHAND | SA_NODEFER;
+        sigaction(sig, &fatal, nullptr);
     }
     socketpair(AF_UNIX, SOCK_STREAM, 0, sig_interrupt_fds.data());
     sig_interrupt_fds[2] = 1;
