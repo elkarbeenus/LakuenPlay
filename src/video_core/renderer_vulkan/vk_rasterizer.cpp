@@ -2865,6 +2865,17 @@ void RasterizerVulkan::FlushCommands() {
     }
     draw_counter = 0;
     pending_native_work = false;
+    // (this fork) Port of Fritchii v5.6 EXP61: nothing recorded since the last submit, nothing
+    // to send. A fence with a download is flushed by InnerFence::Queue and then again here with
+    // an empty command buffer: ~4,600 empty submits a second in Castle Town.
+    // EDEN_NX2_EMPTY_FLUSH=1 submits them again.
+    static const bool empty_flush = [] {
+        const char* value = std::getenv("EDEN_NX2_EMPTY_FLUSH");
+        return value != nullptr && value[0] == '1';
+    }();
+    if (!empty_flush && !scheduler.RecordedSinceSubmit()) {
+        return;
+    }
     // Fences with downloads or queries come here right after queueing: ~9,400 a second in
     // Hyrule Warriors: Age of Imprisonment fights. Batched like the fences themselves.
     if (!scheduler.DeferFlush()) {

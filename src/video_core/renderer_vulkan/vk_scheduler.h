@@ -256,6 +256,12 @@ public:
             location, RecordSite::Own, 0);
     }
 
+    /// (this fork) Whether a command or an upload was recorded since the last Flush or Finish: a
+    /// FlushCommands with nothing to submit is skipped (port of Fritchii v5.6 EXP61).
+    [[nodiscard]] bool RecordedSinceSubmit() const noexcept {
+        return record_serial != submitted_serial;
+    }
+
     /// Whether the recording thread submitted `tick` within 20 ms.
     [[nodiscard]] bool WaitForSubmission(u64 tick) const {
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds{20};
@@ -369,6 +375,8 @@ public:
 
 private:
     std::chrono::steady_clock::time_point last_flush{};
+    u64 record_serial{};    ///< Commands and uploads recorded
+    u64 submitted_serial{}; ///< record_serial at the last Flush or Finish
     bool flush_pending{};
 
     class Command {
@@ -473,6 +481,7 @@ private:
         if (VideoCommon::GpuSplit::check_owner) [[unlikely]] {
             VideoCommon::GpuSplit::CheckOwner("Scheduler::Record");
         }
+        ++record_serial;
         if (uploads_pending) {
             // Uploads recorded before this command go before it.
             FlushUploads();
