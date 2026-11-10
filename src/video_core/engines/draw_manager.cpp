@@ -231,6 +231,13 @@ void Maxwell3D::DrawManager::SetInlineIndexBuffer(Maxwell3D& maxwell3d, u32 meth
     draw_state.draw_mode = DrawMode::InlineIndex;
 }
 
+void Maxwell3D::DrawManager::AddLoopInstances(Maxwell3D& maxwell3d, u32 count) {
+    // DrawBegin, `count` times, for draw.instance_id == Subsequent.
+    draw_state.instance_count += count;
+    draw_state.draw_mode = DrawMode::Instance;
+    draw_state.topology = maxwell3d.regs.draw.topology;
+}
+
 void Maxwell3D::DrawManager::DrawBegin(Maxwell3D& maxwell3d) {
     auto reset_instance_count = maxwell3d.regs.draw.instance_id == Maxwell3D::Regs::Draw::InstanceId::First;
     auto increment_instance_count = maxwell3d.regs.draw.instance_id == Maxwell3D::Regs::Draw::InstanceId::Subsequent;
