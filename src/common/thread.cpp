@@ -759,7 +759,45 @@ void PinCurrentThread(PinnedRole role) {
     }
 #elif defined(__linux__) && !defined(__ANDROID__)
     static const GpuThreadPinning plan = [] {
-        GpuThreadPinning result = PlanGpuThreadPinning(LinuxProcessors());
+        const std::vector<LogicalProcessor> processors = LinuxProcessors();
+        GpuThreadPinning result = PlanGpuThreadPinning(processors);
+        // (this fork, handheld) With 4 or 5 cores (Steam Deck, Legion Go S) there are not enough
+        // for the plan above, and the split's back, the busiest GPU thread there (~86% of a core
+        // in Ocarina), shared its core's SMT sibling with guest threads. It now gets the last
+        // physical core alone; the front and the guest cores share the others.
+        // EDEN_NX2_PIN_BACK_CORE=0 leaves the threads unpinned on such hosts.
+        const char* pin_back = std::getenv("EDEN_NX2_PIN_BACK_CORE");
+        const bool pin_back_core = pin_back == nullptr || pin_back[0] != '0';
+        if (result.front.empty() && pin_back_core && result.performance_cores >= 4 &&
+            !processors.empty()) {
+            u8 fastest = 0;
+            u32 last_core = 0;
+            for (const LogicalProcessor& processor : processors) {
+                fastest = (std::max)(fastest, processor.efficiency_class);
+            }
+            for (const LogicalProcessor& processor : processors) {
+                if (processor.efficiency_class == fastest) {
+                    last_core = (std::max)(last_core, processor.core);
+                }
+            }
+            for (const LogicalProcessor& processor : processors) {
+                if (processor.efficiency_class != fastest) {
+                    continue;
+                }
+                if (processor.core == last_core) {
+                    result.back.push_back(processor.id);
+                } else {
+                    result.front.push_back(processor.id);
+                    result.guest.push_back(processor.id);
+                }
+            }
+            LOG_INFO(Common,
+                     "GPU thread pinning ({} cores): the back on physical core {} alone ({} "
+                     "logical processors), front and guest cores on the other {}",
+                     result.performance_cores, last_core, result.back.size(),
+                     result.guest.size());
+            return result;
+        }
         if (result.front.empty()) {
             LOG_WARNING(Common,
                         "GPU thread pinning skipped: {} physical performance cores, needs {}",
