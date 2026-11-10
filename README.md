@@ -6,97 +6,163 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 -->
 
-<h2 align="center">⚠️ Lichii has no official website ⚠️</h2>
-
-> [!CAUTION]
-> **Lichii has no official website.** The only site run by this project is the **game compatibility website, [lichii.zortos.me](https://lichii.zortos.me)**, for compatibility reports only. Download Lichii **only** from this repository's [releases page](https://github.com/zortos293/Lichii/releases). Any other "Lichii" website or download (such as lichii.org) is not ours and may contain malware ([#545](https://github.com/zortos293/Lichii/issues/545)).
+<h1 align="center">LaküenPlay</h1>
 
 <p align="center">
-  <img src="dist/branding/lichii_icon_with_logo.png" alt="Lichii" width="600">
+  <b>A performance-focused Linux fork of <a href="https://github.com/zortos293/Lichii">Lichii</a> build 130</b><br>
+  Tuned for desktop PCs and AMD handhelds (Steam Deck, Lenovo Legion Go S)
 </p>
 
-# Lichii
+<p align="center">
+  <img alt="License: GPL-3.0-or-later" src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue">
+  <img alt="Platform: Linux x86-64" src="https://img.shields.io/badge/platform-Linux%20x86--64-informational">
+  <img alt="Base: Lichii build 130" src="https://img.shields.io/badge/base-Lichii%20build%20130-8a63d2">
+  <img alt="Status: experimental" src="https://img.shields.io/badge/status-experimental-orange">
+</p>
 
-Lichii is an experimental, open-source Nintendo Switch and Switch 2 emulator written in C++. It builds on Eglantine, Eden, yuzu and Sudachi, preserving their contributions while developing this fork's game compatibility and renderer fixes.
+---
 
-This is an independent fork, not an official release of those upstream projects. Lichii is not affiliated with Nintendo.
+LaküenPlay is an unofficial, experimental fork of **Lichii**, the open-source Nintendo Switch and Switch 2 emulator. It starts from Lichii **build 130** and adds performance, memory and stability work for Linux. It focuses on two targets: a desktop build, and a handheld build for AMD's low-power APUs.
 
-Visit the [Lichii game compatibility website](https://lichii.zortos.me) to find games and compare community compatibility reports.
+Almost everything here builds on other people's work. Lichii, Eglantine, Eden, yuzu and Sudachi did the hard part; this fork collects, ports and tunes. See [Credits](#credits).
 
-## Downloads and setup
+> [!IMPORTANT]
+> This is **not** an official Lichii release and is not affiliated with the Lichii, Eglantine or Eden projects, or with Nintendo. Please report problems with these builds **here**, not upstream. For the official emulator, use [Lichii's releases](https://github.com/zortos293/Lichii/releases).
 
-Download Lichii only from this repository's [releases page](https://github.com/zortos293/Lichii/releases). Lichii has no other download site: archives offered elsewhere, such as lichii.org, are not built by this project, and one has been reported to install malware ([#545](https://github.com/zortos293/Lichii/issues/545)).
+## Contents
 
-On Windows, extract the entire build archive and run **lichii.exe**. Only use games and system files you have legally obtained. Games, keys and firmware are not included.
+- [Builds](#builds)
+- [What changed since Lichii build 130](#what-changed-since-lichii-build-130)
+- [Handheld build](#handheld-build)
+- [Environment switches](#environment-switches)
+- [Installing and data folders](#installing-and-data-folders)
+- [Building from source](#building-from-source)
+- [Credits](#credits)
+- [License](#license)
 
-### Existing saves and settings
+## Builds
 
-The rebrand intentionally retains the existing Eden/Eglantine data directories and configuration keys. It does not move or delete saves, settings or shader caches. Back up your saves before testing experimental builds.
+| Build | Branch | Target hardware | CPU baseline |
+| --- | --- | --- | --- |
+| **PC** | [`build_130_better_ram`](../../tree/build_130_better_ram) | Desktop Linux / SteamOS PCs | generic x86-64 |
+| **Handheld** | [`build_130_handheld_1161`](../../tree/build_130_handheld_1161) | Steam Deck (LCD/OLED), Legion Go S (Z2 Go) and similar AMD handhelds | Zen 2 and newer |
 
-## Compatibility and issue reports
+Each build ships as a self-contained **AppImage** in two variants:
 
-Compatibility and performance vary by game, hardware and driver. Rendering errors, stutters and crashes remain possible. Passing automated tests does not establish that a game renders correctly, and this project makes no universal frame-rate guarantee.
+- **PGO** (recommended): the same program compiled with profile-guided optimization, using a profile recorded on the target hardware.
+- **Standard**: no profile, for comparison or if the PGO build misbehaves.
 
-Browse [community compatibility reports](https://lichii.zortos.me/reports) for results with each player's build and setup.
+Builds are produced by [GitHub Actions](../../actions/workflows/release-binaries.yml). Every run is titled with what it contains. Download the artifact of the newest successful run (needs a GitHub login), or use the [Releases](../../releases) page once releases are published.
 
-Desktop reporting requires a build containing [PR #303](https://github.com/zortos293/Lichii/pull/303) and is not available in build 88. In builds that include it, play and stop a Switch 2 game, then right-click that game and choose **Submit compatibility report**. Only the latest session in the current Lichii process is eligible.
+## What changed since Lichii build 130
 
-Confirm the matching website catalog entry and review the editable machine, game, setup, and enabled add-on details prefilled where available. Check the public preview and give explicit consent before submitting. Nothing uploads automatically, and the native v1 reporter does not read or upload logs or files.
+The changes are grouped by area. Each one names where it came from. Nearly every new behaviour has an environment switch, so it can be turned off for comparison (see [Environment switches](#environment-switches)).
 
-When [reporting an issue](https://github.com/zortos293/Eglantine/issues), include:
+### GPU thread and command processing
 
-- The exact build, game version, CPU, GPU and driver version.
-- Relevant settings and steps to reproduce the problem.
-- A screenshot and the log from the affected session, after checking it for personal information.
+- **Split GPU thread with fewer stalls** ([Lichii #1161](https://github.com/zortos293/Lichii/pull/1161)). Semaphore acquires are decided without draining the split, delta "fast draws" are taken in more cases, and reports are cheaper on the split's back thread. Synchronization waits dropped to roughly a quarter.
+- **Fast draws survive more register writes.** Writes to `vertex_id_base`, counter resets, render-enable and per-draw reports no longer force a full draw setup.
+- **Empty submits are skipped.** `FlushCommands` no longer submits to the GPU when nothing was recorded since the last submit (from Fritchii). Fewer driver calls and less CPU time.
+- **Faster JIT compilation.** Dynarmic's IR verification pass is skipped in release builds, so guest code compiles faster when new code paths come up.
+- **GPU page translations cached per thread** (from Eglantine). This cuts repeated page-table walks on the GPU threads.
+- **Faster shader translation for large compute programs.** Storage-buffer searches don't walk the same failed instructions again (from Eglantine).
 
-Do not upload game files, keys, firmware or private account information.
+### Memory and RAM usage
 
-## Building and contributing
+- **All-zero guest pages are handed back to the system.** Games often clear several GB of heap at boot. On Linux these pages are punched out of the backing memory, and the emulator's freed heap is returned with `malloc_trim`.
+- **The pipeline cache keeps what it built.** The budget for unused prebuilt pipelines scales with video memory, between 2,000 and 10,000, and the idle age before eviction is ~7.5 min at 60 fps instead of ~2.5 min ([Lichii #1107](https://github.com/zortos293/Lichii/pull/1107)). This avoids rebuild stutter when you return to an area.
+- **Integrated GPUs stay out of permanent "texture emergency" mode** ([Lichii #823](https://github.com/zortos293/Lichii/pull/823)). The texture budget on iGPUs now limits textures only, not all GPU memory.
+- **Uneven-mip ASTC textures stay compressed on AMD** ([Lichii #1194](https://github.com/zortos293/Lichii/pull/1194)). They are resized to an evenly halving shape and re-compressed to BC instead of kept as RGBA8, which is 4–8× smaller.
+- **At most 4 shader workers on Linux PCs with 16 GB of RAM or less.** This prevents memory spikes during shader bursts.
+- **"Hot pages"** (from Eglantine) stops write-protecting pages the CPU rewrites every frame. It is available but **off by default**, because it raised RAM use on some systems.
 
-See the [build guide](docs/Build.md), [user documentation](docs/user/README.md) and [coding guidelines](docs/Coding.md). Some inherited documentation and internal build target names still use upstream names. The GUI build target remains `yuzu`; its output is `lichii.exe` on Windows and `lichii` on other desktop platforms.
+### AMD / RADV stability
 
-Keep changes focused and distinguish code-level checks from actual gameplay testing.
+- **Task/mesh draws take the compute fallback on RADV by default.** Native mesh shaders hang RDNA2 GPUs on current Mesa ([Lichii #871](https://github.com/zortos293/Lichii/issues/871)).
+- **Task/mesh pipelines are built without the driver's optimizer on AMD.** This avoids pathological compile times.
+- **Bounds-checked texture decodes and robust buffer access** against AMD device-lost errors.
+- **A ceiling on compare-exchange loop attempts in shaders**, against GPU hangs.
+- **The leaner mesh-emulation path** (from lethevimlet's [BC-250 fork](https://github.com/lethevimlet/oot-bc250)) skips empty emulated mesh draws and uses a narrower barrier.
+- **The occlusion-query copy waits only on the newest query on RADV too**, as Lichii already did on AMD's proprietary driver.
 
-## Artwork
-Art created by YOB (yobslab)
-The supplied Lichii logo, icon and library artwork are in [dist/branding](dist/branding). Windows, Linux and macOS icon resources are generated from that artwork by [Generate-LichiiIcons.ps1](tools/Generate-LichiiIcons.ps1).
+### Stability fixes ported from newer Lichii
 
-## Support Lichii
+- **No more freeze while a compute pipeline is rebuilt** ([Lichii #969](https://github.com/zortos293/Lichii/pull/969)). Dispatches keep running while a native compute pipeline is rebuilt.
+- **Evicted pipelines keep their storage-buffer pointers when translated again** ([#1143](https://github.com/zortos293/Lichii/pull/1143), [#1154](https://github.com/zortos293/Lichii/pull/1154)).
+- **Destroyed memory releases its GPU ranges** ([#1199](https://github.com/zortos293/Lichii/pull/1199), [#1221](https://github.com/zortos293/Lichii/pull/1221)). Every GPU range into memory that is destroyed is unmapped and its device range released. A reused device range is mapped to the CPU range's current pages. PC build only.
+- **Fewer lock-order deadlocks** ([#1218](https://github.com/zortos293/Lichii/pull/1218)). GPU-memory registry and address-space listeners are called outside their locks. PC build only.
+- **No UI freeze when closing a stuck game** ([#1234](https://github.com/zortos293/Lichii/pull/1234)).
+- **No ADPCM audio crackle** ([#1196](https://github.com/zortos293/Lichii/pull/1196)). The sign of the ADPCM nibble steps is fixed.
+- **No wasted depth upload.** A cleared depth target that is larger than its colour target no longer gets a guest upload.
 
-Lichii is free and stays free. If you want to help, you can donate in crypto. Donations help pay for the AI tools and build machines used to develop this open-source project faster.
+### Build and tooling
 
-**Solana (SOL)**
-```text
-JepEjfyWjGjhJvHSrqj52KtLjcbbbmUh1iGqerYBF4w
-```
+- **Linux-only CI with PGO.** `clang` with profile-guided optimization, using profiles recorded on a Ryzen 7 5800X3D / RX 6600 XT (PC) and a Steam Deck (handheld).
+- **Profiles can be recorded on your own device.** An instrumented "measurement" build mode (`pgo_mode=generate`) writes them, and raw profiles in `.zst` or `.xz` are merged automatically.
+- **Normal and instrumented builds of a branch can run side by side.** Each run carries a short note in its title.
+- **Clear naming.** The window title, log header and About dialog name the build and credit Lichii and Eden.
 
-**Ethereum (ETH)**
-```text
-0x055ABa1b80Bc35C836Ce7E9F47c2b3d6C75b5534
-```
+## Handheld build
 
-**Bitcoin (BTC)**
-```text
-bc1qcvxdpf4qvdhqp8ee4s355cjmxrzsphsdwpl8w4
-```
+On top of everything above, the handheld build adds:
 
-**BNB Smart Chain (BNB)**
-```text
-0x055ABa1b80Bc35C836Ce7E9F47c2b3d6C75b5534
-```
+- **Zen 2 compile target.** Built with the `zen2` preset for the Steam Deck APU and Legion Go S. It does not run on older CPUs.
+- **A dedicated core for the GPU back thread on 4–5-core CPUs.** Lichii only pinned threads from 6 cores up. Here the back thread gets the last physical core to itself.
+- **Frame-ahead presentation.** The game may start the next frame while the GPU side is still behind, so CPU, GPU threads and GPU overlap (from lethevimlet's BC-250 fork).
+- **Recommended settings for handhelds.** Steam Deck and AMD Ryzen Z1/Z2 handhelds are recognized by CPU name, and the build offers fitting settings once: handheld mode, 1× resolution, no FXAA, bilinear scaling, normal GPU clocks and shader precaching before game start. You can apply them later with *Help → Apply Recommended Settings* and undo them with *Help → Restore My Previous Settings* (built on [Lichii #1200](https://github.com/zortos293/Lichii/pull/1200)).
+- **More fast draws.** Writes to render-target slots the current draw doesn't use no longer end a fast-draw chain. On a Steam Deck this raised delta draws by about a third.
+- **Optional `malloc_trim` skip** once there is nothing left to trim, to test against periodic hitches.
 
-**Polygon**
-```text
-0x055ABa1b80Bc35C836Ce7E9F47c2b3d6C75b5534
-```
+## Environment switches
 
-Send each coin on its matching network. Coins sent on the wrong network can't be recovered.
+Set these before launching. For example, in Steam's launch options: `EDEN_NX2_HOT_PAGES=1 %command%`.
 
-> [!NOTE]
-> Donations are voluntary gifts and are non-refundable. A donation does not buy any product, service, perk, early access, exclusive build, priority support or say in the project. Every release stays free and public for everyone.
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `EDEN_NX2_HOT_PAGES=1` | off | Stop write-protecting pages the CPU rewrites every frame |
+| `EDEN_NX2_NO_TRANSLATION_CACHE=1` | cache on | Disable the per-thread GPU page translation cache |
+| `EDEN_NX2_EMPTY_FLUSH=1` | skip on | Submit to the GPU even when nothing was recorded |
+| `EDEN_NX2_JIT_FAST_COMPILE=0` | on | Keep dynarmic's IR verification pass |
+| `EDEN_NX2_DEPTH_CLEAR_UPLOAD=1` | skip on | Upload cleared depth targets again |
+| `EDEN_NX2_EVEN_BC=0` | on | Keep uneven-mip ASTC textures as RGBA8 on AMD |
+| `EDEN_NX2_QUERY_WAIT_ALL=1` | off | Wait on every occlusion query on RADV |
+| `EDEN_NX2_MESH_WIDE_BARRIER=1` | off | Use the full barrier before emulated mesh draws |
+| `EDEN_NX2_FORCE_MESH_FALLBACK=0` | fallback on RADV | Use native task/mesh shaders on RADV (may hang RDNA2) |
+| `EDEN_NX2_AMD_MESH_OPT=1` | off | Build task/mesh pipelines with the driver's optimizer on AMD |
+| `EDEN_NX2_ZERO_TRIM=0` | on | Don't return all-zero guest pages and freed heap to the system |
+| `EDEN_NX2_PIN_BACK_CORE=0` | on (handheld) | Don't pin the GPU back thread on 4–5-core CPUs |
+| `EDEN_NX2_FRAMES_AHEAD=1` | 2 (handheld) | Don't run a frame ahead |
+| `EDEN_NX2_FAST_DRAW_RT_SLOTS=0` | on (handheld) | Let writes to unused render-target slots end fast draws again |
+| `EDEN_NX2_MALLOC_TRIM=0` | off (handheld) | Skip `malloc_trim` once nothing is left to trim |
 
-## Credits and license
+## Installing and data folders
 
-Lichii inherits the work of the Eglantine, Eden, yuzu and Sudachi projects and their contributors, including Eglantine's original developer Camille LaVey. Original copyright notices and third-party licenses are retained.
+1. Download the AppImage for your device (see [Builds](#builds)).
+2. Make it executable (`chmod +x *.AppImage`) and run it. On SteamOS you can add it to Steam as a non-Steam game.
+3. Supply your own keys, firmware and games. Only use content you have legally obtained. Nothing of the kind is included or provided here.
 
-See [LICENSE.txt](LICENSE.txt) and the source files for applicable license terms.
+LaküenPlay uses **the same data folders and settings as Lichii**. Saves, keys, settings and shader caches carry over in both directions. Back up your saves before trying experimental builds.
+
+## Building from source
+
+The build steps are the same as Lichii's. See the [build guide](docs/Build.md). The exact CI configuration, including the PGO steps, is in [`.github/workflows/release-binaries.yml`](.github/workflows/release-binaries.yml). The GUI target is still called `yuzu`, and the binary is `lichii`.
+
+## Credits
+
+LaküenPlay exists because of these projects and people:
+
+- **[Lichii](https://github.com/zortos293/Lichii)** by zortos293 and contributors: the base of this fork (build 130) and most of the ported fixes.
+- **[Eglantine](https://github.com/Djihads80/Eglantine)**: hot pages, the GPU page translation cache and faster compute-shader translation.
+- **Eden**, **yuzu**, **Sudachi** and **Citra**: the emulator foundations underneath all of the above.
+- **Lichii pull request authors** whose work is included: Lucas Borges (#1161), Brandon Bunnelle (#1107), Nanoc6 (#1218), PantACRO4life (#1221), Daniel Jesús Martín Flores (#1234), Zachary McKenney (#1154), Zortos (#1143, #1199, #1200), and the authors of #823, #969, #1194 and #1196.
+- **[Fritchii](https://github.com/Frizti/Lichii)** by Frizti: skipping empty GPU submits.
+- **[lethevimlet's BC-250 fork](https://github.com/lethevimlet/oot-bc250)**: the leaner mesh-emulation path and frame-ahead presentation.
+- **[Lichii Ally](https://github.com/Syyrhc/Lichii-Ally)** by Syyrhc: the blit path for skipping a game's post-processing network.
+
+Changes made in this fork were developed with the help of Claude (Anthropic). Each commit names its source.
+
+## License
+
+LaküenPlay is licensed under the **GNU General Public License v3.0 or later**, the same as Lichii and Eden (see [LICENSE.txt](LICENSE.txt)). Parts inherited from yuzu and Citra are GPL-2.0-or-later. Per-file license details are in [`LICENSES/`](LICENSES) and the SPDX headers.
+
+*Nintendo Switch is a trademark of Nintendo. This project is not affiliated with or endorsed by Nintendo.*
