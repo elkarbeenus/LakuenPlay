@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <utility>
 
 #include "common/alignment.h"
@@ -204,7 +205,8 @@ void nvhost_as_gpu::OnOpen(NvCore::SessionId session_id, DeviceFD fd) {
 void nvhost_as_gpu::Nx2Map(u64 gpu_address, u64 cpu_address, u64 size) {
     DAddr device_address{};
     bool fresh = false; ///< Mapped to the current pages just now
-    Core::Memory::Memory* memory = nullptr;
+    // Holds the process alive until the queued refresh ran (port of zortos293/Lichii #1236)
+    std::shared_ptr<Kernel::KScopedAutoObject<Kernel::KProcess>> process;
     Core::Asid asid{};
     {
         std::scoped_lock lock(mutex);
@@ -254,7 +256,10 @@ void nvhost_as_gpu::Nx2Map(u64 gpu_address, u64 cpu_address, u64 size) {
         Nx2GpuMemoryRegistry::Get().RecordDeviceRange(cpu_address, size, device_address);
         // A reused range is checked on the GPU thread, before the GMMU map, against the pages the
         // CPU range has now (Nx2RefreshBacking; port of zortos293/Lichii #1221, 46e7920081).
-        memory = fresh ? nullptr : &session->process->GetMemory();
+        if (!fresh) {
+            process = std::make_shared<Kernel::KScopedAutoObject<Kernel::KProcess>>(
+                system.Kernel(), session->process);
+        }
         asid = session->asid;
     }
     // On the GPU thread, like unmaps: a GMMU map takes the texture cache lock, and the callers hold
@@ -263,10 +268,11 @@ void nvhost_as_gpu::Nx2Map(u64 gpu_address, u64 cpu_address, u64 size) {
     // space (Nx2BackSparse) and would wait for `mutex`.
     system.GPU().MapInOrder(
         gpu_address, size,
-        [gmmu = gmmu.get(), &smmu = system.Host1x().MemoryManager(), memory, asid, gpu_address,
-         cpu_address, device_address, size] {
-            if (memory != nullptr) {
-                Nx2RefreshBacking(smmu, *memory, asid, device_address, cpu_address, size);
+        [gmmu = gmmu.get(), &smmu = system.Host1x().MemoryManager(), process = std::move(process),
+         asid, gpu_address, cpu_address, device_address, size] {
+            if (process) {
+                Nx2RefreshBacking(smmu, process->GetPointerUnsafe()->GetMemory(), asid,
+                                  device_address, cpu_address, size);
             }
             gmmu->Map(gpu_address, device_address, size, Tegra::PTEKind::PITCH, false);
         });
