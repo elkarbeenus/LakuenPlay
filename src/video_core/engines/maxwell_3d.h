@@ -3325,13 +3325,42 @@ private:
             draw_manager.DrawDeferred(*this, true);
         }
         if (VideoCommon::Nx2FastDraw::Enabled() && regs.reg_array[method] != argument &&
-            !IsFastDrawParameter(method)) {
+            !IsFastDrawParameter(method) && !IsUnusedRenderTargetWrite(method)) {
             VideoCommon::Nx2FastDraw::Break(VideoCommon::Nx2FastDraw::Reason::Register, method);
         }
         regs.reg_array[method] = argument;
         for (const auto& table : dirty.tables) {
             dirty.flags[table[method]] = true;
         }
+    }
+
+    /// (this fork) A write to a render target slot that no colour target maps to (rt_control)
+    /// changes nothing the next draws bind. Ocarina of Time rewrites unused slots' heights and
+    /// layers between draws (on a Steam Deck the last break of ~3,700 fast draw chains a second:
+    /// 0x853, 0x856, 0x813). The dirty flags are still set, and a write to rt_control that maps
+    /// the slot ends the chain itself. EDEN_NX2_FAST_DRAW_RT_SLOTS=0 ends it as before.
+    [[nodiscard]] bool IsUnusedRenderTargetWrite(u32 method) const {
+        constexpr u32 first = static_cast<u32>(MAXWELL3D_REG_INDEX(rt));
+        constexpr u32 words = sizeof(Regs::RenderTargetConfig) / sizeof(u32);
+        if (method < first || method >= first + words * Regs::NumRenderTargets) {
+            return false;
+        }
+        static const bool enabled = [] {
+            const char* value = std::getenv("EDEN_NX2_FAST_DRAW_RT_SLOTS");
+            return value == nullptr || value[0] != '0';
+        }();
+        if (!enabled) {
+            return false;
+        }
+        const u32 slot = (method - first) / words;
+        const u32 count = (std::min)(static_cast<u32>(regs.rt_control.count),
+                                     static_cast<u32>(Regs::NumRenderTargets));
+        for (u32 index = 0; index < count; ++index) {
+            if (regs.rt_control.Map(index) == slot) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /// CallMethodFast for a state register (not in execution_mask): a write of the value the
