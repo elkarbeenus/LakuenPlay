@@ -3097,9 +3097,21 @@ ImageId TextureCache<P>::JoinImages(const ImageInfo& info, GPUVAddr gpu_addr, DA
             return false;
         }
         // The clear covers the framebuffer's render area, the smallest bound target.
+        // (this fork) Not for the clear's own depth target, which follows IsFullClear as an
+        // existing one does: Ocarina binds a 1920x1024 depth buffer under 1280x720 colour, and
+        // this rule uploaded its 7.5 MiB from guest memory every frame. Port of Fritchii
+        // 6129793a6 / f93124a6b (EXP56; Castle Town 41.3 -> 43.8 fps, same screenshots).
+        // EDEN_NX2_DEPTH_CLEAR_UPLOAD=1 brings the upload back.
+        static const bool depth_clear_upload = [] {
+            const char* value = std::getenv("EDEN_NX2_DEPTH_CLEAR_UPLOAD");
+            return value != nullptr && value[0] == '1';
+        }();
+        const bool depth_follows_full_clear =
+            !depth_clear_upload && regs.zeta_enable && regs.zeta.Address() == gpu_addr;
         for (u32 index = 0; index < regs.rt_control.count && index < NUM_RT; ++index) {
             const auto& rt = regs.rt[index];
-            if (rt.Address() != 0 && rt.format != Tegra::RenderTargetFormat::NONE &&
+            if (!depth_follows_full_clear && rt.Address() != 0 &&
+                rt.format != Tegra::RenderTargetFormat::NONE &&
                 (rt.width < width || rt.height < height)) {
                 return false;
             }
