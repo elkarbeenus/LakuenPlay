@@ -13,6 +13,7 @@
 #include <bit>
 #include <bitset>
 #include <chrono>
+#include <thread>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -545,6 +546,27 @@ public:
     void BeginGraphicsUniforms(const Nx2FastDraw::Delta* delta);
 
     Common::SpinRecursiveMutex mutex;
+    /// (this fork) Guest threads waiting to take `mutex` back after a read's download landed
+    /// (FinishReadDownloads). The lock is unfair: the split's back takes it for every draw and
+    /// took it again before a woken reader could, so a read of a few KiB waited up to 2-4 s on
+    /// a Steam Deck. The back gives way while this is non-zero (YieldToReaders).
+    std::atomic<u32> readers_waiting{};
+    /// The back, before it locks `mutex` for a draw or dispatch: wait (at most ~2 ms) while a
+    /// reader is waiting for the lock. EDEN_NX2_READ_FAIR=0 turns it off.
+    void YieldToReaders() {
+        static const bool enabled = [] {
+            const char* value = std::getenv("EDEN_NX2_READ_FAIR");
+            return value == nullptr || value[0] != '0';
+        }();
+        if (!enabled || readers_waiting.load(std::memory_order_relaxed) == 0) {
+            return;
+        }
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds{2};
+        while (readers_waiting.load(std::memory_order_acquire) != 0 &&
+               std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::yield();
+        }
+    }
     Runtime& runtime;
     bool any_buffer_uploaded = false;
     /// Indirectly read banks of native programs already uploaded this frame.

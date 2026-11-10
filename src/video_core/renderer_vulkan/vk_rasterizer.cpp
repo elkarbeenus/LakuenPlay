@@ -1041,6 +1041,7 @@ void RasterizerVulkan::PrepareDraw(bool is_indexed, Func&& draw_func, bool is_in
         mesh_emulation_groups = groups;
         mesh_emulation_vertices_per_group = pipeline->MeshEmulationVerticesPerGroup();
     }
+    buffer_cache.YieldToReaders();
     std::scoped_lock lock{buffer_cache.mutex, texture_cache.mutex};
     // What the next draw's TakeReusableDraw compares with, read once the caches are locked: a
     // break from here on, this draw's own resolve included, ends the delta chain.
@@ -2128,6 +2129,7 @@ void RasterizerVulkan::DispatchCompute() {
         if (kepler_compute->IsNativeMode()) throw Shader::RuntimeError("Native compute pipeline unavailable");
         return;
     }
+    buffer_cache.YieldToReaders();
     std::scoped_lock lock{texture_cache.mutex, buffer_cache.mutex};
     std::optional<ByteAddressedShadow> byte_addressed_shadow;
     const Tegra::Nx2ListStats::WriterScope list_writer{Tegra::Nx2ListStats::Writer::Dispatch,
