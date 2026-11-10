@@ -228,6 +228,9 @@ std::pair<u32, u32> GRenderWindow::ScaleTouch(const QPointF& pos) const {
 }
 
 void GRenderWindow::closeEvent(QCloseEvent* event) {
+    LOG_WARNING(Frontend, "Render window got a close event (spontaneous={}, from the window "
+                          "system or compositor if true): asking to stop the game",
+                event->spontaneous());
     emit Closed();
     QWidget::closeEvent(event);
 }
