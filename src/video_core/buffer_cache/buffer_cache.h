@@ -378,16 +378,19 @@ std::optional<VideoCore::RasterizerDownloadArea> BufferCache<P>::GetFlushArea(DA
         area->preemtive = false;
     }
     // A preflushable mark persists and downloads later GPU writes at every fence. Native titles
-    // instead keep read traps and flush on demand. EDEN_NX2_PREFLUSH=1/0 forces either: Ocarina
-    // reads ~200 GPU-written pages a second, each on-demand flush stalling its CPU and the GPU
-    // thread (CheezerWheezer/Lichii measured 45 -> 50 fps in Kokiri Forest preflushing them,
-    // ff310a2b and 7d1128ae).
+    // instead keep read traps and flush on demand, except Ocarina of Time: it reads ~200
+    // GPU-written pages a second, each on-demand flush stalling its CPU and the GPU thread
+    // (CheezerWheezer/Lichii: 45 -> 50 fps in Kokiri Forest, no flashes in 3,600 watched frames;
+    // ff310a2b, 7d1128ae). EDEN_NX2_PREFLUSH=1/0 forces either for any title.
     static const int forced_preflush = [] {
         const char* value = std::getenv("EDEN_NX2_PREFLUSH");
         return value == nullptr ? -1 : (value[0] != '0' ? 1 : 0);
     }();
-    const bool preflush = forced_preflush >= 0 ? forced_preflush == 1
-                                               : !Tegra::g_nx2_ampere.load(std::memory_order_relaxed);
+    constexpr u64 ocarina_of_time = 0x0400486024DEC000ULL;
+    const bool preflush = forced_preflush >= 0      ? forced_preflush == 1
+                          : program_id == ocarina_of_time ? true
+                                                     : !Tegra::g_nx2_ampere.load(
+                                                           std::memory_order_relaxed);
     if (!area->preemtive) {
         if (Nx2DownloadTrace::g_enabled) [[unlikely]] {
             Nx2DownloadTrace::Marked(device_addr_start_aligned,
