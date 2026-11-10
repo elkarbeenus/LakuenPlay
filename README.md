@@ -52,7 +52,7 @@ Each build ships as a self-contained **AppImage** in two variants:
 - **PGO** (recommended): the same program compiled with profile-guided optimization, using a profile recorded on the target hardware.
 - **Standard**: no profile, for comparison or if the PGO build misbehaves.
 
-**⬇️ Latest release: [LaküenPlay v1.0 – PC](../../releases/tag/v1.0)** (`LakuenPlay-v1.0-PC-x86_64-pgo.AppImage` is recommended). The handheld build is still in testing.
+**⬇️ Latest release: [LaküenPlay v1.1 – PC](../../releases/tag/v1.1)** (`LakuenPlay-v1.1-PC-x86_64-pgo.AppImage` is recommended). The handheld build is still in testing.
 
 Test builds are produced by [GitHub Actions](../../actions/workflows/release-binaries.yml), and every run is titled with what it contains. Downloading an artifact needs a GitHub login.
 
