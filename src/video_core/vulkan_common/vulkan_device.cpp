@@ -27,6 +27,7 @@
 #include <ranges>
 #include "common/settings.h"
 #include "common/settings_enums.h"
+#include "video_core/nx2_read_trace.h"
 #include "video_core/nx2_stutter_trace.h"
 #include "video_core/vulkan_common/nsight_aftermath_tracker.h"
 #include "video_core/vulkan_common/vma.h"
@@ -489,6 +490,18 @@ void Device::RemoveExtensionFeatureIfUnsuitable(bool is_suitable, Feature& featu
     }
 }
 
+namespace {
+/// AMD FSR 4 runs AMD's own shaders inside AMD's runtime (Windows, AMD's driver). They need
+/// float16 and, on RDNA 4, float8 on the device; the emulator's shaders use neither for it.
+bool WantsAmdFsr4(VkDriverId driver_id) {
+#ifdef _WIN32
+    return driver_id == VK_DRIVER_ID_AMD_PROPRIETARY && Settings::values.amd_fsr4.GetValue();
+#else
+    return false;
+#endif
+}
+} // Anonymous namespace
+
 Device::Device(VkInstance instance_, vk::PhysicalDevice physical_, VkSurfaceKHR surface,
                const vk::InstanceDispatch& dld_)
     : instance{instance_}, dld{dld_}, physical{physical_},
@@ -653,6 +666,7 @@ Device::Device(VkInstance instance_, vk::PhysicalDevice physical_, VkSurfaceKHR 
     // off for newer AMD drivers below: checked after that, every AMD GPU looked like GCN4 and lost
     // VK_EXT_sampler_filter_minmax (an RDNA3 Radeon 780M logged it).
     const bool amd_gcn4_or_older = is_amd && !features.shader_float16_int8.shaderFloat16;
+    const bool device_float16 = features.shader_float16_int8.shaderFloat16;
     if (is_amd_driver) {
         // AMD drivers need a higher amount of Sets per Pool in certain circumstances like in XC2.
         sets_per_pool = 96;
@@ -799,7 +813,7 @@ Device::Device(VkInstance instance_, vk::PhysicalDevice physical_, VkSurfaceKHR 
     // host-only shaders (frame generation) may use it. The AMD and Intel workarounds turn it off
     // for every shader, host ones included.
     host_float16_supported |= float16_math;
-    if (host_float16_supported) {
+    if (host_float16_supported || (device_float16 && WantsAmdFsr4(driver_id))) {
         features.shader_float16_int8.shaderFloat16 = VK_TRUE;
     }
     logical = vk::Device::Create(physical, queue_cis, ExtensionListForVulkan(loaded_extensions), first_next, dld);
@@ -824,7 +838,9 @@ Device::Device(VkInstance instance_, vk::PhysicalDevice physical_, VkSurfaceKHR 
     functions.vkAllocateMemory = TimedAllocateMemory;
     functions.vkFreeMemory = TimedFreeMemory;
 
-    VmaAllocatorCreateFlags flags = VMA_ALLOCATOR_CREATE_EXTERNALLY_SYNCHRONIZED_BIT;
+    // Synchronized inside VMA: the image recycler destroys dropped images on a thread of its own
+    // while the GPU thread allocates (vulkan_wrapper.cpp).
+    VmaAllocatorCreateFlags flags = 0;
     if (extensions.memory_budget) {
         flags |= VMA_ALLOCATOR_CREATE_EXT_MEMORY_BUDGET_BIT;
     }
@@ -864,6 +880,7 @@ Device::Device(VkInstance instance_, vk::PhysicalDevice physical_, VkSurfaceKHR 
     };
 
     vk::Check(vmaCreateAllocator(&allocator_info, &allocator));
+    vk::ImageRecycler::Open(allocator);
 
     owns_static_pipeline_cache = surface != VkSurfaceKHR{};
     LoadStaticPipelineCache();
@@ -887,6 +904,7 @@ Device::~Device() {
             }
         }
     }
+    vk::ImageRecycler::Clear(allocator);
     vmaDestroyAllocator(allocator);
 }
 
@@ -1246,6 +1264,15 @@ bool Device::GetSuitability(bool requires_swapchain) {
 
     FOR_EACH_VK_FEATURE_EXT(FEATURE_EXTENSION);
     FOR_EACH_VK_EXTENSION(EXTENSION);
+
+    // TEST (EDEN_NX2_READ_TRACE): the device's clock, read from the host (Scheduler::TraceRead).
+    if (VideoCommon::ReadTrace::Enabled()) {
+        if (supported_extensions.contains(VK_KHR_CALIBRATED_TIMESTAMPS_EXTENSION_NAME)) {
+            loaded_extensions.insert(VK_KHR_CALIBRATED_TIMESTAMPS_EXTENSION_NAME);
+        } else if (supported_extensions.contains(VK_EXT_CALIBRATED_TIMESTAMPS_EXTENSION_NAME)) {
+            loaded_extensions.insert(VK_EXT_CALIBRATED_TIMESTAMPS_EXTENSION_NAME);
+        }
+    }
 
     extensions.depth_stencil_resolve =
         extensions.depth_stencil_resolve &&
@@ -1887,6 +1914,14 @@ void Device::RemoveUnsuitableExtensions() {
     RemoveExtensionFeatureIfUnsuitable(extensions.pipeline_binary, features.pipeline_binary,
                                        VK_KHR_PIPELINE_BINARY_EXTENSION_NAME);
 
+    // VK_EXT_shader_float8, only for AMD FSR 4: its RDNA 4 network runs in FP8 and drew a black
+    // picture without the feature on the device (found by CheezerWheezer).
+    if (extensions.shader_float8 &&
+        (!features.shader_float8.shaderFloat8 || !WantsAmdFsr4(properties.driver.driverID))) {
+        RemoveExtensionFeature(extensions.shader_float8, features.shader_float8,
+                               VK_EXT_SHADER_FLOAT8_EXTENSION_NAME);
+    }
+
     // VK_KHR_maintenance6
     extensions.maintenance6 = features.maintenance6.maintenance6;
     RemoveExtensionFeatureIfUnsuitable(extensions.maintenance6, features.maintenance6,
@@ -1966,6 +2001,23 @@ void Device::ReleaseCustomBorderColorSamplers(size_t count) const {
 }
 
 u64 Device::GetDeviceMemoryUsage() const {
+    // The buffer and texture caches ask every frame; with the budget extension each answer is a
+    // driver and OS query (~0.1-0.5 ms on Windows): answers younger than 50 ms are reused.
+    constexpr s64 reuse_ns = 50'000'000;
+    const s64 now = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        std::chrono::steady_clock::now().time_since_epoch())
+                        .count();
+    const s64 last = memory_usage_time.load(std::memory_order_acquire);
+    if (last != 0 && now - last < reuse_ns) {
+        return memory_usage_value.load(std::memory_order_relaxed);
+    }
+    const u64 usage = QueryDeviceMemoryUsage();
+    memory_usage_value.store(usage, std::memory_order_relaxed);
+    memory_usage_time.store(now, std::memory_order_release);
+    return usage;
+}
+
+u64 Device::QueryDeviceMemoryUsage() const {
     VkPhysicalDeviceMemoryBudgetPropertiesEXT budget{};
     budget.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT;
     physical.GetMemoryProperties(&budget);
