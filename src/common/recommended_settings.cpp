@@ -4,8 +4,43 @@
 #include <map>
 #include <utility>
 #include "common/recommended_settings.h"
+#ifdef ARCHITECTURE_x86_64
+#include "common/cpu_features.h"
+#endif
 
 namespace Settings {
+
+HandheldDevice DetectHandheldDevice() {
+#ifdef ARCHITECTURE_x86_64
+    static const HandheldDevice device = [] {
+        const std::string_view name{Common::g_cpu_caps.cpu_string};
+        if (name.find("AMD Custom APU 0405") != std::string_view::npos ||
+            name.find("AMD Custom APU 0932") != std::string_view::npos) {
+            return HandheldDevice::SteamDeck;
+        }
+        if (name.find("Ryzen Z1") != std::string_view::npos ||
+            name.find("Ryzen Z2") != std::string_view::npos) {
+            return HandheldDevice::AmdHandheld;
+        }
+        return HandheldDevice::None;
+    }();
+    return device;
+#else
+    return HandheldDevice::None;
+#endif
+}
+
+std::string_view HandheldDeviceName(HandheldDevice device) {
+    switch (device) {
+    case HandheldDevice::SteamDeck:
+        return "Steam Deck";
+    case HandheldDevice::AmdHandheld:
+        return "Legion Go S / AMD handheld";
+    case HandheldDevice::None:
+        break;
+    }
+    return {};
+}
 namespace {
 
 // The backup is "label:value,label:value", with values as BasicSetting::ToStringGlobal gives them.
