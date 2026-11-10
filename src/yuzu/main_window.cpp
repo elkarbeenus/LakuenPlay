@@ -5536,6 +5536,9 @@ bool MainWindow::ConfirmClose() {
 }
 
 void MainWindow::closeEvent(QCloseEvent* event) {
+    LOG_WARNING(Frontend, "Main window got a close event (spontaneous={}, from the window "
+                          "system or compositor if true)",
+                event->spontaneous());
     if (!close_pending && !ConfirmClose()) {
         event->ignore();
         return;
