@@ -87,7 +87,14 @@ bool RecommendedSettingsDialog::Ask(QWidget* parent) {
     QMessageBox box(parent);
     box.setIcon(QMessageBox::Question);
     box.setWindowTitle(tr("Recommended settings"));
-    box.setText(tr("Do you want to use the recommended settings from the Lichii developer?"));
+    // (this fork) On a Steam Deck or an AMD handheld the table holds that device's values.
+    const auto device = Settings::HandheldDeviceName(Settings::DetectHandheldDevice());
+    if (device.empty()) {
+        box.setText(tr("Do you want to use the recommended settings from the Lichii developer?"));
+    } else {
+        box.setText(tr("%1 detected. Do you want to use the recommended settings for it?")
+                        .arg(QString::fromUtf8(device.data(), static_cast<qsizetype>(device.size()))));
+    }
     box.setInformativeText(
         tr("They improve performance for most games. Lichii keeps your own settings, so you can "
            "go back at any time with Help > Restore My Previous Settings. Per-game settings do "

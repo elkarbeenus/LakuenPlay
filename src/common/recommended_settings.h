@@ -3,17 +3,32 @@
 #pragma once
 
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <vector>
 #include "common/settings.h"
 
 namespace Settings {
 
+/// (this fork) Handhelds the recommended table has its own values for.
+enum class HandheldDevice { None, SteamDeck, AmdHandheld };
+
+/// The handheld this host is, from the CPU's name: Steam Deck LCD and OLED ("AMD Custom APU 0405"
+/// and "0932"), Legion Go S and other AMD handhelds ("AMD Ryzen Z1" / "Z2"). None elsewhere.
+[[nodiscard]] HandheldDevice DetectHandheldDevice();
+
+/// "Steam Deck", "Legion Go S / AMD handheld", or an empty string.
+[[nodiscard]] std::string_view HandheldDeviceName(HandheldDevice device);
+
 /// The Lichii developer's recommended settings. This table is the only place that lists them:
 /// change a value here to change what "Use recommended settings" writes. Personal and hardware
 /// choices (language, region, resolution, upscaler, backend, device) stay out of it.
 template <typename Func>
 void ForEachRecommendedSetting(Values& values, Func&& func) {
+    // (this fork) On a Steam Deck or an AMD handheld (Legion Go S), the values measured there:
+    // the CPU side of the emulator is the limit, so the game may lower its resolution and render
+    // distance (GPU Clocks Normal), and the handheld renders in handheld mode without FXAA.
+    const bool handheld = DetectHandheldDevice() != HandheldDevice::None;
     const auto entry = [&func]<typename Type, bool ranged>(SwitchableSetting<Type, ranged>& setting,
                                                            std::type_identity_t<Type> value) {
         func(setting, value);
@@ -66,7 +81,14 @@ void ForEachRecommendedSetting(Values& values, Func&& func) {
 
     // System
     entry(values.cpu_clock, CpuClock::Normal);
-    entry(values.gpu_clock, GpuClock::Boost);
+    entry(values.gpu_clock, handheld ? GpuClock::Normal : GpuClock::Boost);
+    if (handheld) {
+        entry(values.use_docked_mode, ConsoleMode::Handheld);
+        entry(values.resolution_setup, ResolutionSetup::Res1X);
+        entry(values.anti_aliasing, AntiAliasing::None);
+        entry(values.scaling_filter, ScalingFilter::Bilinear);
+        entry(values.oot_anti_aliasing, OotAntiAliasing::NoSharpening);
+    }
     entry(values.use_multi_core, true);
     entry(values.memory_layout_mode, MemoryLayout::Memory_4Gb);
     entry(values.use_speed_limit, true);
