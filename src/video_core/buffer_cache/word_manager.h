@@ -48,11 +48,13 @@ enum class Type {
 /// Frames since start, moved by BufferCache::TickFrame. Hot page state is dropped every 128.
 inline std::atomic<u32> g_hot_page_epoch{0};
 
-/// EDEN_NX2_HOT_PAGES=0 turns the hot page handling off.
+/// Off by default (this fork): hot pages are uploaded again every frame, and on an area change
+/// in Ocarina so many pages became hot that the staging memory filled 16 GB of RAM on the owner's
+/// PC. EDEN_NX2_HOT_PAGES=1 turns it on.
 [[nodiscard]] inline bool HotPagesEnabled() {
     static const bool enabled = [] {
         const char* value = std::getenv("EDEN_NX2_HOT_PAGES");
-        return value == nullptr || value[0] != '0';
+        return value != nullptr && value[0] == '1';
     }();
     return enabled;
 }
