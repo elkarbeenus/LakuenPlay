@@ -2100,6 +2100,20 @@ void PipelineCache::EvictUnusedPipelines() {
     if (frame_count <= EvictAfterFrames) {
         return;
     }
+    // (handheld build) A Steam Deck runs ~30 fps, so 27000 frames is only ~15 minutes, and a
+    // 24-minute session evicted 1610 pipelines and built 1660 again at ~14 ms of GPU-thread
+    // translation each: 23.7 s of stalls, single frames up to 2.7 s when re-entering an area.
+    // A title's whole cache fits in a few hundred MB of the shared 16 GB, so nothing is evicted
+    // while fewer than 6000 graphics pipelines are built. EDEN_NX2_PIPELINE_KEEP_ALL=<count>
+    // changes the limit; 0 evicts as before.
+    static const size_t keep_all_below = [] {
+        const char* value = std::getenv("EDEN_NX2_PIPELINE_KEEP_ALL");
+        return value != nullptr ? static_cast<size_t>(std::strtoull(value, nullptr, 10))
+                                : size_t{6000};
+    }();
+    if (graphics_cache.size() < keep_all_below) {
+        return;
+    }
     const u64 cutoff = frame_count - EvictAfterFrames;
     const u64 tick = scheduler.CurrentTick();
     // The budget of never-used prebuilt pipelines scales with the device's memory: one pipeline
