@@ -48,6 +48,8 @@ permissions:
 # eglantine.profdata; bump it when a refreshed profile needs a newer LLVM.
 env:
   PGO_LLVM_VERSION: "23"
+  # File and artifact name of this OoT build (no umlaut in file names).
+  APP_LABEL: LakuenPlay-OoT-PC
 
 # A running build is never cancelled: it finishes and publishes. A push meanwhile queues one build;
 # a later push replaces it, so the newest commit builds as soon as the running one is done.
@@ -472,7 +474,7 @@ jobs:
           export EXTRA_PLATFORM_PLUGINS='libqwayland-egl.so;libqwayland-generic.so'
           # Embedded in the AppImage metadata; matches the release tag (build-N) plus the commit.
           export LDAI_VERSION="build-${GITHUB_RUN_NUMBER}-${GITHUB_SHA::7}"
-          export LDAI_OUTPUT="lichii-${GITHUB_SHA}-${{ matrix.platform }}.AppImage"
+          export LDAI_OUTPUT="${APP_LABEL}-build-${GITHUB_RUN_NUMBER}-${GITHUB_SHA::7}-${{ matrix.platform }}.AppImage"
           export OUTPUT="$LDAI_OUTPUT"
           export ARCH="$arch"
           mkdir -p AppDir/usr/bin
@@ -633,10 +635,10 @@ jobs:
         if: startsWith(matrix.platform, 'linux')
         uses: actions/upload-artifact@v7
         with:
-          name: lichii-${{ matrix.platform }}${{ (matrix.pgo && inputs.pgo_mode == 'generate') && '-instrumented' || '' }}-${{ github.sha }}
+          name: ${{ env.APP_LABEL }}-build-${{ github.run_number }}-${{ matrix.platform }}${{ (matrix.pgo && inputs.pgo_mode == 'generate') && '-instrumented' || '' }}-${{ github.sha }}
           path: |
             lichii-${{ github.sha }}-${{ matrix.platform }}.tar.gz
-            lichii-${{ github.sha }}-${{ matrix.platform }}.AppImage
+            ${{ env.APP_LABEL }}-build-*-${{ matrix.platform }}.AppImage
           if-no-files-found: error
           compression-level: 0
           retention-days: 7
@@ -668,7 +670,7 @@ jobs:
       - name: Download binaries
         uses: actions/download-artifact@v7
         with:
-          pattern: lichii-*-${{ github.sha }}
+          pattern: '*-${{ github.sha }}'
           path: artifacts
 
       - name: Package release files
