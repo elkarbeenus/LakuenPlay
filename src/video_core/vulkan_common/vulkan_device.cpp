@@ -1900,9 +1900,18 @@ void Device::RemoveUnsuitableExtensions() {
     features.mesh_shader.meshShaderQueries = VK_FALSE;
     extensions.mesh_shader = features.mesh_shader.taskShader && features.mesh_shader.meshShader;
     // EDEN_NX2_FORCE_MESH_FALLBACK=1: leave VK_EXT_mesh_shader disabled, so task/mesh draws take
-    // the compute fallback a device without it uses.
-    if (extensions.mesh_shader && std::getenv("EDEN_NX2_FORCE_MESH_FALLBACK") != nullptr) {
-        LOG_WARNING(Render_Vulkan, "EDEN_NX2_FORCE_MESH_FALLBACK: VK_EXT_mesh_shader disabled");
+    // the compute fallback a device without it uses. On by default with RADV: native task/mesh
+    // draws hang RDNA2 there (zortos293/Lichii#871, Mesa issue 16816). On an RX 6600 XT, Ocarina
+    // reset the GPU every time at Lon Lon Ranch with them and ran without a reset on the fallback,
+    // as on the RX 6600, 7900 XT and 9070 XT in #871. EDEN_NX2_FORCE_MESH_FALLBACK=0: native.
+    const char* mesh_fallback = std::getenv("EDEN_NX2_FORCE_MESH_FALLBACK");
+    const bool radv = properties.driver.driverID == VK_DRIVER_ID_MESA_RADV;
+    const bool force_fallback =
+        mesh_fallback != nullptr ? mesh_fallback[0] != '0' : radv;
+    if (extensions.mesh_shader && force_fallback) {
+        LOG_WARNING(Render_Vulkan, "{}: VK_EXT_mesh_shader disabled, task/mesh draws take the "
+                                   "compute fallback (EDEN_NX2_FORCE_MESH_FALLBACK=0: native)",
+                    mesh_fallback != nullptr ? "EDEN_NX2_FORCE_MESH_FALLBACK" : "RADV default");
         extensions.mesh_shader = false;
     }
     RemoveExtensionFeatureIfUnsuitable(extensions.mesh_shader, features.mesh_shader,
