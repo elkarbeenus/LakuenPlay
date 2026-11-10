@@ -1,8 +1,15 @@
 name: release-binaries
+# (this fork) The run title says what the build contains: the note given at dispatch, the
+# branch, and whether the PGO build is normal or instrumented.
+run-name: "${{ inputs.note || github.ref_name }} · PGO ${{ inputs.pgo_mode == 'generate' && 'Mess-Build (instrumentiert)' || 'normal' }}"
 
 on:
   workflow_dispatch:
     inputs:
+      note:
+        description: What this build contains (shown as the run title)
+        type: string
+        default: ""
       publish_release:
         description: Publish the binaries as a GitHub release
         type: boolean
