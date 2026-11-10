@@ -1583,6 +1583,17 @@ void Maxwell3D::FrontWrite(VideoCommon::GpuSplit& split, FrontState& fs, u32 met
         }
         return;
     }
+    // Instance folding (port of Lichii #1274): a later instance of an instance loop. The
+    // register keeps its value (instance id Subsequent, the same topology) and nothing waits in
+    // the back's sink, so all the write does there is count one more instance
+    // (DrawManager::DrawBegin): the count is sent once, before the front's next entry.
+    if (method == MAXWELL3D_REG_INDEX(draw.begin) && fs.instance_loop &&
+        ((value >> 26) & 3) == 1 && fs.skip_same && !fs.sink_pending && shadow_kept &&
+        fs.regs[method] == value && FoldInstancesEnabled()) {
+        fs.draw_pending = true;
+        split.FoldInstance(&FlushFoldedInstances, this);
+        return;
+    }
     if (!execution_mask[method]) {
         // Nothing would change on the back: CallMethod and ConsumeSinkImpl skip same-value state
         // writes, and the shadow RAM (tracked by default) holds the value already.
@@ -2155,6 +2166,24 @@ void Maxwell3D::FrontTrackInstanceLoop(FrontState& fs, u32 method, u32 value) {
     default:
         break;
     }
+}
+
+bool Maxwell3D::FoldInstancesEnabled() {
+    // EDEN_NX2_FOLD_INSTANCES=0: every later instance is sent as its own write again.
+    static const bool enabled = [] {
+        const char* const value = std::getenv("EDEN_NX2_FOLD_INSTANCES");
+        return value == nullptr || value[0] != '0';
+    }();
+    return enabled;
+}
+
+void Maxwell3D::FlushFoldedInstances(void* engine, u32 count) {
+    auto* const self = static_cast<Maxwell3D*>(engine);
+    // As the draw.begin writes: instance loop methods do not end the fast draw path, and the
+    // draw they defer may write anywhere.
+    VideoCommon::GpuSplit::Get().Defer(
+        [self, count] { self->draw_manager.AddLoopInstances(*self, count); },
+        VideoCommon::GpuSplit::Writes::Anywhere, VideoCommon::GpuSplit::FastDrawNeutral);
 }
 
 bool Maxwell3D::FrontSkipsLoopWrite(FrontState& fs, u32 method, u32 value, bool shadow_kept) {
