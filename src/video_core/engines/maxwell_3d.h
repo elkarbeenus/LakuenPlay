@@ -3351,7 +3351,8 @@ private:
     /// changes nothing the next draws bind. Ocarina of Time rewrites unused slots' heights and
     /// layers between draws (on a Steam Deck the last break of ~3,700 fast draw chains a second:
     /// 0x853, 0x856, 0x813). The dirty flags are still set, and a write to rt_control that maps
-    /// the slot ends the chain itself. EDEN_NX2_FAST_DRAW_RT_SLOTS=0 ends it as before.
+    /// the slot ends the chain itself. Off by default: the Steam Deck ran slower with it (24 -> 20
+    /// fps); EDEN_NX2_FAST_DRAW_RT_SLOTS=1 turns it on.
     [[nodiscard]] bool IsUnusedRenderTargetWrite(u32 method) const {
         constexpr u32 first = static_cast<u32>(MAXWELL3D_REG_INDEX(rt));
         constexpr u32 words = sizeof(Regs::RenderTargetConfig) / sizeof(u32);
@@ -3360,7 +3361,7 @@ private:
         }
         static const bool enabled = [] {
             const char* value = std::getenv("EDEN_NX2_FAST_DRAW_RT_SLOTS");
-            return value == nullptr || value[0] != '0';
+            return value != nullptr && value[0] == '1';
         }();
         if (!enabled) {
             return false;
