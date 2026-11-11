@@ -6,6 +6,13 @@
 #include <fstream>
 #include <system_error>
 
+#ifdef __linux__
+#include <cstdlib>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 #include "common/fs/file.h"
 #include "common/fs/file_lock.h"
 #include "common/fs/path_util.h"
@@ -60,8 +67,54 @@ u64 UnixNow() {
                                 .count());
 }
 
+namespace {
+
+#ifdef __linux__
+/// The file mapped read-only (see LogFile::mapped), or nothing when it is small or can't be. A log
+/// only grows in place (appends, and a failed append cut back to where it was) and is replaced by
+/// a rename, so the mapped bytes stay readable for as long as the mapping lives.
+std::shared_ptr<const u8> MapLogFile(const std::filesystem::path& file, size_t& size) {
+    static const bool enabled = [] {
+        const char* const value = std::getenv("EDEN_NX2_CACHE_MMAP");
+        return value == nullptr || value[0] != '0';
+    }();
+    if (!enabled) {
+        return {};
+    }
+    const int fd = ::open(file.c_str(), O_RDONLY | O_CLOEXEC);
+    if (fd < 0) {
+        return {};
+    }
+    struct stat info{};
+    std::shared_ptr<const u8> result;
+    if (::fstat(fd, &info) == 0 && info.st_size >= static_cast<off_t>(1) << 20) {
+        const size_t length = static_cast<size_t>(info.st_size);
+        void* const base = ::mmap(nullptr, length, PROT_READ, MAP_PRIVATE, fd, 0);
+        if (base != MAP_FAILED) {
+            size = length;
+            result = std::shared_ptr<const u8>(static_cast<const u8*>(base),
+                                               [length](const u8* pointer) {
+                                                   ::munmap(const_cast<u8*>(pointer), length);
+                                               });
+        }
+    }
+    ::close(fd);
+    return result;
+}
+#endif
+
+} // Anonymous namespace
+
 LogFile ReadLogFile(const std::filesystem::path& file, const ForEach& for_each) {
     LogFile log;
+#ifdef __linux__
+    size_t mapped_size{};
+    log.mapped = MapLogFile(file, mapped_size);
+    if (log.mapped) {
+        log.parsed = ParseLog(std::span<const u8>{log.mapped.get(), mapped_size}, for_each);
+        return log;
+    }
+#endif
     std::ifstream stream(file, std::ios::binary | std::ios::ate);
     if (stream.is_open()) {
         const std::streamoff size = stream.tellg();
