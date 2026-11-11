@@ -87,6 +87,21 @@
 namespace Vulkan {
 
 namespace {
+/// Native (Switch 2) draws without a depth test are never skipped while their pipeline builds: they
+/// draw into images the game keeps (exposure and luminance chains, font atlases), and a skipped one
+/// stayed wrong for the session (rooms far too bright, missing glyphs). Port of Eglantine
+/// 7a940ca19d. EDEN_NX2_DEPTHLESS_DISCARD=1 lets them be skipped as before.
+bool KeepDepthlessNativeDraw(bool native, bool depth_enabled) {
+    static const bool allow = [] {
+        const char* value = std::getenv("EDEN_NX2_DEPTHLESS_DISCARD");
+        return value != nullptr && value[0] == '1';
+    }();
+    return native && !depth_enabled && !allow;
+}
+} // Anonymous namespace
+
+
+namespace {
 using Shader::Backend::SPIRV::EmitSPIRV;
 using Shader::Maxwell::ConvertLegacyToGeneric;
 using Shader::Maxwell::GenerateGeometryPassthrough;
@@ -2235,9 +2250,11 @@ GraphicsPipeline* PipelineCache::BuiltPipeline(GraphicsPipeline* pipeline) noexc
         }
     }
     // Native draws are judged by the heuristic only when a mode other than Wait is chosen.
-    const bool can_discard = CanDiscardPendingDraw(
-        native, maxwell3d->regs.zeta_enable != 0, draw_state.draw_element_count,
-        draw_state.draw_element_count, native && mode != NativePendingMode::Wait);
+    const bool can_discard =
+        !KeepDepthlessNativeDraw(native, maxwell3d->regs.zeta_enable != 0) &&
+        CanDiscardPendingDraw(native, maxwell3d->regs.zeta_enable != 0,
+                              draw_state.draw_element_count, draw_state.draw_element_count,
+                              native && mode != NativePendingMode::Wait);
     bool discard = can_discard;
     if (native) {
         switch (DecideNativePending(mode, can_discard, native_wait_budget_us)) {
