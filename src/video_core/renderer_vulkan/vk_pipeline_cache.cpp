@@ -2264,6 +2264,21 @@ bool PipelineCache::CanSkipDrawForTranslation() const {
 }
 
 bool PipelineCache::QueueAsyncTranslation() {
+    // (this fork) Each queued job holds its stages' constant buffers and code until it is
+    // translated and written to disk. Entering Castle Town or the castle grounds queued hundreds
+    // on a Steam Deck and memory ran out; past the limit the draw translates its pipeline itself,
+    // which also paces the GPU thread. EDEN_NX2_ASYNC_TRANSLATION_QUEUE: the limit (default 48,
+    // 8 while memory is low).
+    static const size_t queue_limit = [] {
+        const char* const value = std::getenv("EDEN_NX2_ASYNC_TRANSLATION_QUEUE");
+        return std::clamp<size_t>(value != nullptr ? std::strtoull(value, nullptr, 10) : 48, 1,
+                                  4096);
+    }();
+    const size_t limit = Common::IsMemoryLow() ? (std::min<size_t>)(queue_limit, 8) : queue_limit;
+    if (async_translating.size() >= limit) {
+        ++async_queue_full_total;
+        return false;
+    }
     auto job = std::make_shared<AsyncTranslation>();
     job->key = graphics_key;
     GetGraphicsEnvironments(job->environments, graphics_key.unique_hashes);
@@ -2275,8 +2290,12 @@ bool PipelineCache::QueueAsyncTranslation() {
     }
     if (!async_translation_workers) {
         const char* const value = std::getenv("EDEN_NX2_ASYNC_TRANSLATION_THREADS");
-        const size_t threads =
-            std::clamp<size_t>(value != nullptr ? std::strtoull(value, nullptr, 10) : 2, 1, 8);
+        // Half the host's threads, 2 to 4: the guest's cores and the GPU threads keep the rest
+        // (a Steam Deck or Legion Go S: 4).
+        const size_t fallback =
+            std::clamp<size_t>(std::thread::hardware_concurrency() / 2, 2, 4);
+        const size_t threads = std::clamp<size_t>(
+            value != nullptr ? std::strtoull(value, nullptr, 10) : fallback, 1, 8);
         async_translation_workers =
             std::make_unique<Common::ThreadWorker>(threads, "VkPipelineTranslator");
         LOG_INFO(Render_Vulkan,
@@ -2349,9 +2368,11 @@ void PipelineCache::AdoptAsyncTranslations() {
         async_report = now;
         LOG_INFO(Render_Vulkan,
                  "Shader cache v3: {} pipelines translated on workers so far, {} adopted now "
-                 "({:.1f} ms of translation off the GPU thread), {} lookups skipped meanwhile",
+                 "({:.1f} ms of translation off the GPU thread), {} lookups skipped meanwhile, "
+                 "{} translated on the GPU thread with the queue full",
                  async_queued_total, done.size(),
-                 std::chrono::duration<double, std::milli>(total).count(), async_skipped_lookups);
+                 std::chrono::duration<double, std::milli>(total).count(), async_skipped_lookups,
+                 async_queue_full_total);
     }
 }
 

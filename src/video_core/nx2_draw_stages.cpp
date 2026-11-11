@@ -71,8 +71,14 @@ void Configure() {
 
 bool BackStagesRequested() {
     static const bool requested = [] {
+        // (LaküenPlay handheld) On by default: the split's back is the bottleneck on a Steam Deck
+        // or Legion Go S, and stage B takes the draw recording off it. EDEN_NX2_BACK_STAGES=0:
+        // both stages on the back, as before.
         const char* const value = std::getenv("EDEN_NX2_BACK_STAGES");
-        return value != nullptr && value[0] == '1';
+        const bool on = value == nullptr || value[0] != '0';
+        LOG_INFO(HW_GPU, "Draw packets: stage B on its own thread {} (EDEN_NX2_BACK_STAGES={})",
+                 on ? "on" : "off", on ? "0 turns it off" : "0");
+        return on;
     }();
     return requested;
 }

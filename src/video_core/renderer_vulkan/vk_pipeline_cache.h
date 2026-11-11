@@ -366,6 +366,7 @@ private:
     std::vector<std::shared_ptr<AsyncTranslation>> async_translated;
     std::atomic<size_t> async_translated_count{};
     u64 async_queued_total{};
+    u64 async_queue_full_total{};
     u64 async_skipped_lookups{};
     std::chrono::steady_clock::time_point async_report{};
     /// Last: its threads are joined before the members above go.
