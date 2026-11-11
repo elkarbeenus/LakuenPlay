@@ -65,4 +65,9 @@ HeapTrimResult TrimHeap(std::string_view reason);
 /// Deck (14.5 GiB for the system) ran out entering Castle Town and the kernel ended the emulator.
 [[nodiscard]] bool IsMemoryLow();
 
+/// (this fork) MemAvailable below 1.5 GiB (EDEN_NX2_CRITICAL_MEMORY_MIB=<MiB>, 0 never): only then
+/// are built pipelines destroyed. Below IsMemoryLow the textures and the heap give memory back
+/// first; destroying pipelines that are needed again cost more than their ~0.45 MB each.
+[[nodiscard]] bool IsMemoryCritical();
+
 } // namespace Common
