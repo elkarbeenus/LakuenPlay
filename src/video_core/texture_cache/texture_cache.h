@@ -340,6 +340,22 @@ void TextureCache<P>::ClearStaleGpu(GPUVAddr gpu_addr, size_t size) {
     }
 }
 
+/// (this fork) The most the cache's images may take on a PC with 16 GB of RAM or less: 3.5 GiB,
+/// 3 GiB on a Steam Deck (14.5 GiB left to the system, shared with the GPU). What a card's VRAM
+/// can't hold the driver keeps in system RAM, and with ~6 GB of guest memory resident a 5 GiB
+/// cache plus a browser ran the PC out of memory. No cap otherwise. EDEN_NX2_TC_LOW_RAM=0: none.
+inline u64 LowRamTextureCap() {
+    static const u64 cap = [] {
+        const char* value = std::getenv("EDEN_NX2_TC_LOW_RAM");
+        const u64 total = Common::GetMemInfo().TotalPhysicalMemory;
+        if ((value != nullptr && value[0] == '0') || total > (u64{17} << 30)) {
+            return ~u64{0};
+        }
+        return total <= (u64{15} << 30) ? u64{3072} << 20 : u64{3584} << 20;
+    }();
+    return cap;
+}
+
 template <class P>
 void TextureCache<P>::ApplyThresholdOverrides(bool log) {
     // Past what a frame needs, more device memory only keeps the textures of earlier scenes
@@ -358,19 +374,7 @@ void TextureCache<P>::ApplyThresholdOverrides(bool log) {
     // VRAM can't hold the driver keeps in system RAM, and with ~6 GB of guest memory resident
     // a 5 GiB cache plus a browser ran the PC out of memory and the kernel ended the emulator.
     // EDEN_NX2_TC_LOW_RAM=0 keeps the larger cap.
-    static const bool low_ram = [] {
-        const char* value = std::getenv("EDEN_NX2_TC_LOW_RAM");
-        return (value == nullptr || value[0] != '0') &&
-               Common::GetMemInfo().TotalPhysicalMemory <= (u64{17} << 30);
-    }();
-    if (low_ram) {
-        max_critical = (std::min)(max_critical, u64{3584_MiB});
-        // (LaküenPlay) A Steam Deck leaves the system 14.5 GiB (the rest is the GPU's carve-out) and
-        // shares it with the GPU: 3 GiB there.
-        if (Common::GetMemInfo().TotalPhysicalMemory <= (u64{15} << 30)) {
-            max_critical = (std::min)(max_critical, u64{3072_MiB});
-        }
-    }
+    max_critical = (std::min)(max_critical, LowRamTextureCap());
     critical_memory = (std::min)(critical_memory, max_critical);
     expected_memory =
         (std::min)(expected_memory, critical_memory - (std::min)(critical_memory, u64{768_MiB}));
@@ -498,6 +502,10 @@ void TextureCache<P>::TickFrame() {
                     critical_memory = (std::min)(critical_memory, host_critical);
                     const u64 room_margin = (std::min)(pressure_margin + slack_margin, budget / 2);
                     retention_limit = (std::min)(budget - room_margin, host_critical);
+                    // (LaküenPlay) The low-RAM cap holds here too: an integrated GPU's budget left
+                    // a Steam Deck's images 4-5 GiB (thresholds up to 5640 MiB), and the system
+                    // fell to 189 MiB free, paging, with seconds-long freezes opening menus.
+                    critical_memory = (std::min)(critical_memory, LowRamTextureCap());
                     expected_memory = critical_memory - (std::min)(margin, critical_memory / 2);
                     ApplyThresholdOverrides(false);
                     const u64 reserved = margin + pressure_margin + slack_margin;
