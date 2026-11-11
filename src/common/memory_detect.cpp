@@ -234,4 +234,23 @@ bool IsMemoryLow() {
     return low;
 }
 
+bool IsMemoryCritical() {
+    static const u64 threshold = [] {
+        const char* const value = std::getenv("EDEN_NX2_CRITICAL_MEMORY_MIB");
+        return (value != nullptr ? std::strtoull(value, nullptr, 10) : u64{1536}) << 20;
+    }();
+    if (threshold == 0) {
+        return false;
+    }
+    const u64 available = GetMemAvailableCached();
+    const bool critical = available != 0 && available < threshold;
+    static std::atomic<bool> was_critical{};
+    if (critical != was_critical.exchange(critical, std::memory_order_relaxed)) {
+        LOG_WARNING(Common, "Memory {}: {} MiB available (threshold {} MiB)",
+                    critical ? "critical" : "no longer critical", available >> 20,
+                    threshold >> 20);
+    }
+    return critical;
+}
+
 } // namespace Common

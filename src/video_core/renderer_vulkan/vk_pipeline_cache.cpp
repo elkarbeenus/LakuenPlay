@@ -2100,7 +2100,7 @@ void PipelineCache::TickFrame() {
     }
     constexpr u64 EvictCheckFrames = 600;
     if (frame_count % EvictCheckFrames == 0 ||
-        (frame_count % 120 == 0 && Common::IsMemoryLow())) {
+        (frame_count % 120 == 0 && Common::IsMemoryCritical())) {
         EvictUnusedPipelines();
     }
 }
@@ -2133,11 +2133,14 @@ void PipelineCache::EvictUnusedPipelines() {
     // 12 GB RTX 3080: 282 eviction sweeps in a 70-minute session, single frames up to 1.36 s
     // while evicted pipelines were translated again). 27000 frames is ~7.5 min at 60 fps.
     constexpr u64 EvictAfterFrames = 27000;
-    // (this fork) Short of memory, pipelines unused for a minute at 30 fps go, whatever the limits
-    // below: each holds ~0.45 MB of driver memory, and with the boot precache and nothing evicted
-    // a Steam Deck kept thousands while it ran out of memory entering Castle Town.
-    constexpr u64 LowMemoryEvictAfterFrames = 1800;
-    const bool low_memory = Common::IsMemoryLow();
+    // (this fork) Critically short of memory, pipelines unused for ~3 minutes at 30 fps go,
+    // whatever the limits below: each holds ~0.45 MB of driver memory, and with the boot precache
+    // and nothing evicted a Steam Deck kept thousands while it ran out of memory entering Castle
+    // Town. At 2.5 GiB free and one minute idle (the first memory guard) the Deck sat below the
+    // threshold in town and destroyed and rebuilt pipelines all the time, standing or turning.
+    constexpr u64 LowMemoryEvictAfterFrames = 5400;
+    constexpr size_t LowMemoryMaxEvictions = 200; ///< Per sweep (every 120 frames)
+    const bool low_memory = Common::IsMemoryCritical();
     if (!low_memory && frame_count <= EvictAfterFrames) {
         return;
     }
@@ -2170,7 +2173,7 @@ void PipelineCache::EvictUnusedPipelines() {
     constexpr size_t MinUnusedPrebuiltPipelines = 2000;
     constexpr size_t MaxUnusedPrebuiltPipelines = 10000;
     const size_t unused_prebuilt_budget =
-        low_memory ? size_t{300}
+        low_memory ? size_t{1500}
                    : std::clamp<size_t>(device.GetDeviceLocalMemory() / (size_t{3} << 20),
                                         MinUnusedPrebuiltPipelines, MaxUnusedPrebuiltPipelines);
     static size_t logged_budget = 0;
@@ -2186,6 +2189,9 @@ void PipelineCache::EvictUnusedPipelines() {
     size_t evicted = 0;
     for (auto it = graphics_cache.begin(); it != graphics_cache.end();) {
         GraphicsPipeline* const pipeline = it->second.get();
+        if (low_memory && evicted >= LowMemoryMaxEvictions) {
+            break;
+        }
         if (pipeline == nullptr || pipeline == current_pipeline || !pipeline->IsBuilt() ||
             pipeline->LastUse() >= cutoff) {
             ++it;
@@ -2268,13 +2274,14 @@ bool PipelineCache::QueueAsyncTranslation() {
     // translated and written to disk. Entering Castle Town or the castle grounds queued hundreds
     // on a Steam Deck and memory ran out; past the limit the draw translates its pipeline itself,
     // which also paces the GPU thread. EDEN_NX2_ASYNC_TRANSLATION_QUEUE: the limit (default 48,
-    // 8 while memory is low).
+    // 8 while memory is critical).
     static const size_t queue_limit = [] {
         const char* const value = std::getenv("EDEN_NX2_ASYNC_TRANSLATION_QUEUE");
         return std::clamp<size_t>(value != nullptr ? std::strtoull(value, nullptr, 10) : 48, 1,
                                   4096);
     }();
-    const size_t limit = Common::IsMemoryLow() ? (std::min<size_t>)(queue_limit, 8) : queue_limit;
+    const size_t limit =
+        Common::IsMemoryCritical() ? (std::min<size_t>)(queue_limit, 8) : queue_limit;
     if (async_translating.size() >= limit) {
         ++async_queue_full_total;
         return false;
