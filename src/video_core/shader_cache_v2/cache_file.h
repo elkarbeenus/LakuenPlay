@@ -5,6 +5,7 @@
 
 #include <filesystem>
 #include <functional>
+#include <memory>
 #include <span>
 #include <vector>
 
@@ -13,9 +14,15 @@
 
 namespace VideoCommon::ShaderCacheV2 {
 
-/// A log read into memory; `parsed` points into `bytes`.
+/// A log read into memory; `parsed` points into `bytes`, or into `mapped` where the file is mapped.
 struct LogFile {
     std::vector<u8> bytes;
+    /// (this fork) On Linux the file is mapped read-only instead of copied into `bytes`: its pages
+    /// are the page cache's, so under memory pressure the kernel drops them and reads them again
+    /// from the disk instead of writing a heap copy to swap (a 375 MiB cache on a Steam Deck
+    /// stayed in the heap until the background prebuild finished). Unmapped when the last copy
+    /// of this pointer goes. EDEN_NX2_CACHE_MMAP=0 reads it into `bytes` as before.
+    std::shared_ptr<const u8> mapped;
     ParsedLog parsed;
 
     LogFile() = default;
