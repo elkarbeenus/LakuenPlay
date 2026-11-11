@@ -23,6 +23,7 @@
 #include "common/bit_util.h"
 #include "common/div_ceil.h"
 #include "common/literals.h"
+#include "common/memory_detect.h"
 #include "common/settings.h"
 #include "shader_recompiler/byte_addressed_image.h"
 #include "shader_recompiler/exception.h"
@@ -331,6 +332,16 @@ constexpr VkBorderColor ConvertBorderColor(const std::array<float, 4>& color) {
     const VkDriverIdKHR id = device.GetDriverID();
     if (id != VK_DRIVER_ID_AMD_PROPRIETARY && id != VK_DRIVER_ID_AMD_OPEN_SOURCE &&
         id != VK_DRIVER_ID_MESA_RADV) {
+        return false;
+    }
+    // (handheld) A Steam Deck's 14.5 GiB: RGBA8 takes four times BC3's memory, and the seams at
+    // distant terrain are hard to see on its screen. EDEN_NX2_UNEVEN_ASTC_RGBA8=1: RGBA8 there too.
+    static const bool low_ram = [] {
+        const char* value = std::getenv("EDEN_NX2_UNEVEN_ASTC_RGBA8");
+        return !(value != nullptr && value[0] == '1') &&
+               Common::GetMemInfo().TotalPhysicalMemory <= (u64{15} << 30);
+    }();
+    if (low_ram) {
         return false;
     }
     return FirstUnevenBlockMip(info) != 0 && !EvenBcShape(info) && !IsHugeAstcArray(device, info);
