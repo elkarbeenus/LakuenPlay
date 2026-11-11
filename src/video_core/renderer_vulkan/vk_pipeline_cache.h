@@ -358,6 +358,7 @@ private:
     /// Whether the current draw may be skipped while its pipeline translates (GPU thread).
     [[nodiscard]] bool CanSkipDrawForTranslation() const;
     /// Queues graphics_key's translation; false (nothing queued) when it must translate here.
+    bool AsyncTranslationQueueFull();
     bool QueueAsyncTranslation();
     /// Moves finished translations into graphics_cache and stores new ones (GPU thread).
     void AdoptAsyncTranslations();

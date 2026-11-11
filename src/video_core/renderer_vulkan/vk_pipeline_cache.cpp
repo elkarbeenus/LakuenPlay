@@ -2054,7 +2054,11 @@ GraphicsPipeline* PipelineCache::CurrentGraphicsPipelineSlowPath() {
         }
         if (!pipeline) {
             const auto keep = evicted_pointer_slots.Take(graphics_key.Hash());
-            if (!keep && CanSkipDrawForTranslation() && QueueAsyncTranslation()) {
+            if (!keep && CanSkipDrawForTranslation() &&
+                (AsyncTranslationQueueFull() || QueueAsyncTranslation())) {
+                // Queue full: skipped again, and queued at a later lookup once there is room. A
+                // draw translating its pipeline on the GPU thread instead (~14 ms each on a
+                // Steam Deck) made 95-200 ms frames while a place's shaders loaded.
                 graphics_cache.erase(pair);
                 ++async_skipped_lookups;
                 return nullptr;
@@ -2265,12 +2269,12 @@ bool PipelineCache::CanSkipDrawForTranslation() const {
                                  native_may_skip);
 }
 
-bool PipelineCache::QueueAsyncTranslation() {
+bool PipelineCache::AsyncTranslationQueueFull() {
     // (this fork) Each queued job holds its stages' constant buffers and code until it is
     // translated and written to disk. Entering Castle Town or the castle grounds queued hundreds
-    // on a Steam Deck and memory ran out; past the limit the draw translates its pipeline itself,
-    // which also paces the GPU thread. EDEN_NX2_ASYNC_TRANSLATION_QUEUE: the limit (default 48,
-    // 8 while memory is critical).
+    // on a Steam Deck and memory ran out; past the limit a skippable draw is skipped until there
+    // is room. EDEN_NX2_ASYNC_TRANSLATION_QUEUE: the limit (default 48, 8 while memory is
+    // critical).
     static const size_t queue_limit = [] {
         const char* const value = std::getenv("EDEN_NX2_ASYNC_TRANSLATION_QUEUE");
         return std::clamp<size_t>(value != nullptr ? std::strtoull(value, nullptr, 10) : 48, 1,
@@ -2280,8 +2284,12 @@ bool PipelineCache::QueueAsyncTranslation() {
         Common::IsMemoryCritical() ? (std::min<size_t>)(queue_limit, 8) : queue_limit;
     if (async_translating.size() >= limit) {
         ++async_queue_full_total;
-        return false;
+        return true;
     }
+    return false;
+}
+
+bool PipelineCache::QueueAsyncTranslation() {
     auto job = std::make_shared<AsyncTranslation>();
     job->key = graphics_key;
     GetGraphicsEnvironments(job->environments, graphics_key.unique_hashes);
@@ -2293,10 +2301,10 @@ bool PipelineCache::QueueAsyncTranslation() {
     }
     if (!async_translation_workers) {
         const char* const value = std::getenv("EDEN_NX2_ASYNC_TRANSLATION_THREADS");
-        // Half the host's threads, 2 to 4: the guest's cores and the GPU threads keep the rest
-        // (a Steam Deck or Legion Go S: 4).
+        // One less than half the host's threads, 2 to 4: the guest's cores and the GPU threads
+        // keep the rest (a Steam Deck or Legion Go S: 3).
         const size_t fallback =
-            std::clamp<size_t>(std::thread::hardware_concurrency() / 2, 2, 4);
+            std::clamp<size_t>(std::thread::hardware_concurrency() / 2 - 1, 2, 4);
         const size_t threads = std::clamp<size_t>(
             value != nullptr ? std::strtoull(value, nullptr, 10) : fallback, 1, 8);
         async_translation_workers =
@@ -2372,7 +2380,7 @@ void PipelineCache::AdoptAsyncTranslations() {
         LOG_INFO(Render_Vulkan,
                  "Shader cache v3: {} pipelines translated on workers so far, {} adopted now "
                  "({:.1f} ms of translation off the GPU thread), {} lookups skipped meanwhile, "
-                 "{} translated on the GPU thread with the queue full",
+                 "{} skipped with the queue full",
                  async_queued_total, done.size(),
                  std::chrono::duration<double, std::milli>(total).count(), async_skipped_lookups,
                  async_queue_full_total);
