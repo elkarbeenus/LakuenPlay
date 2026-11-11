@@ -259,7 +259,8 @@ public:
     /// (this fork) Whether a command or an upload was recorded since the last Flush or Finish: a
     /// FlushCommands with nothing to submit is skipped (port of Fritchii v5.6 EXP61).
     [[nodiscard]] bool RecordedSinceSubmit() const noexcept {
-        return record_serial != submitted_serial;
+        // A deferred clear holds work without recording a command (Lichii d92ecf4f1d).
+        return record_serial != submitted_serial || deferred_clear.framebuffer != nullptr;
     }
 
     /// Whether the recording thread submitted `tick` within 20 ms.
