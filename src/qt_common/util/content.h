@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <filesystem>
+
 #include <QObject>
 #include "common/common_types.h"
 #include "frontend_common/data_manager.h"
@@ -55,6 +57,15 @@ void ExportDataDir(FrontendCommon::DataManager::DataDir dir, const std::string& 
                    std::function<void()> callback = {});
 void ImportDataDir(FrontendCommon::DataManager::DataDir dir, const std::string& user_id = "",
                    std::function<void()> callback = {});
+
+// Save data transfer (LaküenPlay) //
+/// Zips one game's save folder to zip_path. Returns an error text, empty on success.
+QString ExportSaveDir(const std::filesystem::path& save_dir, const QString& zip_path);
+/// Replaces one game's save folder with a zip's contents (a zip of the folder itself, or of the
+/// files in it). The current save is zipped to backup_zip first; nothing is changed when the zip
+/// holds no files or the backup fails. Returns an error text, empty on success.
+QString ImportSaveDir(const std::filesystem::path& save_dir, const QString& zip_path,
+                      const std::filesystem::path& backup_zip);
 
 // Loader //
 void configureFilesystemProvider(const std::string& filepath);

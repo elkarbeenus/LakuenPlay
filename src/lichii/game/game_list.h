@@ -52,6 +52,8 @@ class VfsFilesystem;
 enum class GameListOpenTarget {
     SaveData,
     ModData,
+    SaveExport, ///< (LaküenPlay) the save data zipped to a file the player picks
+    SaveImport, ///< (LaküenPlay) the save data replaced from a zip, the old one backed up first
 };
 
 enum class DumpRomFSTarget {
