@@ -353,6 +353,8 @@ private slots:
 
     /// Called whenever a user selects a game in the game list widget.
     void OnGameListLoadFile(QString game_path, u64 program_id);
+    /// (LaküenPlay) Export or import one game's save data as a zip (the game list's Save Data Transfer)
+    void TransferGameSave(u64 program_id, const std::filesystem::path& save_dir, bool do_export);
     void OnGameListOpenFolder(u64 program_id, GameListOpenTarget target,
                               const std::string& game_path);
     void OnGameListRemoveInstalledEntry(u64 program_id, QtCommon::Game::InstalledEntryType type);

@@ -85,7 +85,9 @@
 #include <QDir>
 #include <QElapsedTimer>
 #include <QEventLoop>
+#include <QDateTime>
 #include <QFileDialog>
+#include <QRegularExpression>
 #include <QFileInfo>
 #include <QFutureWatcher>
 #include <QGuiApplication>
@@ -2681,6 +2683,73 @@ void MainWindow::OnGameListLoadFile(QString game_path, u64 program_id) {
 }
 
 // TODO(crueter): Common profile selector
+void MainWindow::TransferGameSave(u64 program_id, const std::filesystem::path& save_dir,
+                                  bool do_export) {
+    if (emulation_running) {
+        QMessageBox::information(this, tr("Save Data Transfer"),
+                                 tr("Stop the game first: its save data may change while it runs."));
+        return;
+    }
+    QString name;
+    {   // (the game's own title, for the file name and the question)
+        const FileSys::PatchManager pm{program_id, QtCommon::system->GetFileSystemController(),
+                                       QtCommon::system->GetContentProvider()};
+        if (const auto control = pm.GetControlMetadata().first; control != nullptr) {
+            name = QString::fromStdString(control->GetApplicationName());
+        }
+    }
+    QString file_name =
+        name.isEmpty() ? QString::fromStdString(fmt::format("{:016X}", program_id)) : name;
+    file_name.replace(QRegularExpression(QStringLiteral("[^A-Za-z0-9._-]+")), QStringLiteral("_"));
+    const QString stamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd_HH-mm"));
+    if (do_export) {
+        const QString zip = QFileDialog::getSaveFileName(
+            this, tr("Export Save Data"),
+            QDir::home().filePath(QStringLiteral("%1_save_%2.zip").arg(file_name, stamp)),
+            tr("Zip archives (*.zip)"));
+        if (zip.isEmpty()) {
+            return;
+        }
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        const QString error = QtCommon::Content::ExportSaveDir(save_dir, zip);
+        QApplication::restoreOverrideCursor();
+        if (error.isEmpty()) {
+            QMessageBox::information(this, tr("Save Data Exported"),
+                                     tr("The save data is in\n%1\n\nOn the other device: right-click the "
+                                        "game, Save Data Transfer, Import Save Data.")
+                                         .arg(zip));
+        } else {
+            QMessageBox::warning(this, tr("Save Data Export Failed"), error);
+        }
+        return;
+    }
+    const QString zip = QFileDialog::getOpenFileName(this, tr("Import Save Data"), QDir::homePath(),
+                                                     tr("Zip archives (*.zip)"));
+    if (zip.isEmpty()) {
+        return;
+    }
+    const auto backup = Common::FS::GetEdenPath(Common::FS::EdenPath::EdenDir) / "save_backups" / fmt::format("{:016X}", program_id) /
+                        fmt::format("before_import_{}.zip", stamp.toStdString());
+    if (QMessageBox::question(
+            this, tr("Import Save Data"),
+            tr("Replace the current save data of %1 with this file?\n\nThe current save is backed up "
+               "first to\n%2")
+                .arg(name.isEmpty() ? file_name : name,
+                     QString::fromStdString(Common::FS::PathToUTF8String(backup)))) !=
+        QMessageBox::Yes) {
+        return;
+    }
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    const QString error = QtCommon::Content::ImportSaveDir(save_dir, zip, backup);
+    QApplication::restoreOverrideCursor();
+    if (error.isEmpty()) {
+        QMessageBox::information(this, tr("Save Data Imported"),
+                                 tr("The save data was imported. Start the game to play on with it."));
+    } else {
+        QMessageBox::warning(this, tr("Save Data Import Failed"), error);
+    }
+}
+
 void MainWindow::OnGameListOpenFolder(u64 program_id, GameListOpenTarget target,
                                       const std::string& game_path) {
     std::filesystem::path path;
@@ -2708,6 +2777,8 @@ void MainWindow::OnGameListOpenFolder(u64 program_id, GameListOpenTarget target,
     const bool use_device_save{device_save_size > 0 && user_save_size == 0};
 
     switch (target) {
+    case GameListOpenTarget::SaveExport:
+    case GameListOpenTarget::SaveImport:
     case GameListOpenTarget::SaveData: {
         open_target = tr("Save Data");
         const auto save_dir = Common::FS::GetEdenPath(Common::FS::EdenPath::SaveDir);
@@ -2745,6 +2816,11 @@ void MainWindow::OnGameListOpenFolder(u64 program_id, GameListOpenTarget target,
     default:
         UNIMPLEMENTED();
         break;
+    }
+
+    if (target == GameListOpenTarget::SaveExport || target == GameListOpenTarget::SaveImport) {
+        TransferGameSave(program_id, path, target == GameListOpenTarget::SaveExport);
+        return;
     }
 
     const QString qpath = QString::fromStdString(Common::FS::PathToUTF8String(path));
