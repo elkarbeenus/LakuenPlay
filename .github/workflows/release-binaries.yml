@@ -186,18 +186,19 @@ jobs:
       - name: Install clang for PGO
         if: startsWith(matrix.platform, 'linux') && matrix.pgo
         shell: bash
+        timeout-minutes: 20
         run: |
           set -euo pipefail
-          curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key |
+          curl -fsSL --retry 5 --retry-all-errors --max-time 60 https://apt.llvm.org/llvm-snapshot.gpg.key |
             sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null
           echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-$PGO_LLVM_VERSION main" |
             sudo tee /etc/apt/sources.list.d/llvm.list > /dev/null
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          timeout 600 sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 update
+          timeout 600 sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 install -y --no-install-recommends \
             "clang-$PGO_LLVM_VERSION" "lld-$PGO_LLVM_VERSION" "llvm-$PGO_LLVM_VERSION"
           # The instrumented build links clang's profile runtime (libclang_rt.profile.a).
           if [ '${{ inputs.pgo_mode }}' = 'generate' ]; then
-            sudo apt-get install -y --no-install-recommends "libclang-rt-$PGO_LLVM_VERSION-dev"
+            timeout 600 sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 install -y --no-install-recommends "libclang-rt-$PGO_LLVM_VERSION-dev"
           fi
           "clang-$PGO_LLVM_VERSION" --version
 
@@ -471,9 +472,9 @@ jobs:
           tools="$RUNNER_TEMP/linuxdeploy"
           mkdir -p "$tools"
           arch=$(uname -m)   # aarch64 or x86_64
-          curl -fsSL -o "$tools/linuxdeploy-$arch.AppImage" \
+          curl -fsSL --retry 5 --retry-all-errors --max-time 300 -o "$tools/linuxdeploy-$arch.AppImage" \
           https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-$arch.AppImage
-          curl -fsSL -o "$tools/linuxdeploy-plugin-qt-$arch.AppImage" \
+          curl -fsSL --retry 5 --retry-all-errors --max-time 300 -o "$tools/linuxdeploy-plugin-qt-$arch.AppImage" \
           https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-$arch.AppImage
           chmod +x "$tools"/*.AppImage
           # The desktop file names its icon io.github.zortos293.lichii.
