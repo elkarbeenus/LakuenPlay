@@ -15,6 +15,7 @@
 #include <malloc.h>
 #endif
 
+#include "common/memory_detect.h"
 #include "core/device_memory.h"
 #include "hle/kernel/board/nintendo/nx/k_system_control.h"
 
@@ -80,6 +81,10 @@ void DeviceMemory::TrimZeroPages(std::stop_token stop) {
                 Common::HostMemory::ZeroFilledBytes() - filled_at_pass >= AreaFillBytes) {
                 break;
             }
+            // Short of memory: a pass now, and malloc_trim with it.
+            if (Common::IsMemoryLow()) {
+                break;
+            }
         }
         if (stop.stop_requested()) {
             return;
@@ -96,7 +101,7 @@ void DeviceMemory::TrimZeroPages(std::stop_token stop) {
             const char* value = std::getenv("EDEN_NX2_MALLOC_TRIM");
             return value != nullptr && value[0] == '1';
         }();
-        if (always_malloc_trim || trimmed >= Busy) {
+        if (always_malloc_trim || trimmed >= Busy || Common::IsMemoryLow()) {
             malloc_trim(0);
         }
 #endif
