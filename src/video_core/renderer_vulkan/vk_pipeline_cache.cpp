@@ -2869,9 +2869,27 @@ std::unique_ptr<GraphicsPipeline> PipelineCache::CreateGraphicsPipeline(
     // make it dirty again. A pool too large to flush on every miss translates here as before.
     if (std::ranges::count_if(graphics_key.unique_hashes, [](u64 hash) { return hash != 0; }) >=
         2) {
-        constexpr u64 MaxFlushedTexturePoolBytes = u64{1} << 20;
+        // (this fork) Ocarina of Time's texture pool is larger than 1 MiB, so its misses never took
+        // this path: no log of a Steam Deck showed a stage translated on a worker, and each miss
+        // held the GPU thread for 14-50 ms. Flushing a pool the CPU wrote only checks its pages
+        // (4096 for 16 MiB), so the limit is 16 MiB. EDEN_NX2_PARALLEL_POOL_MIB=<MiB> changes
+        // it; 1 is the old limit.
+        static const u64 MaxFlushedTexturePoolBytes = [] {
+            const char* const value = std::getenv("EDEN_NX2_PARALLEL_POOL_MIB");
+            const u64 mib = value != nullptr ? std::strtoull(value, nullptr, 10) : 16;
+            return (std::max)(mib, u64{1}) << 20;
+        }();
         const auto& tex_header = maxwell3d->regs.tex_header;
         const u64 pool_bytes = (u64{tex_header.limit} + 1) * sizeof(Tegra::Texture::TICEntry);
+        if (pool_bytes > MaxFlushedTexturePoolBytes) {
+            static std::atomic<u32> logged{};
+            if (logged.fetch_add(1, std::memory_order_relaxed) < 3) {
+                LOG_INFO(Render_Vulkan,
+                         "Texture pool of {} KiB is over the parallel translation limit "
+                         "(EDEN_NX2_PARALLEL_POOL_MIB): the stages translate on the GPU thread",
+                         pool_bytes / 1024);
+            }
+        }
         if (pool_bytes <= MaxFlushedTexturePoolBytes) {
             gpu_memory->FlushRegion(tex_header.Address(), pool_bytes);
             for (size_t index = 0; index < Maxwell::MaxShaderProgram; ++index) {
