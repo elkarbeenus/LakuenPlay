@@ -89,6 +89,9 @@ void ForEachRecommendedSetting(Values& values, Func&& func) {
         entry(values.anti_aliasing, AntiAliasing::None);
         entry(values.scaling_filter, ScalingFilter::Bilinear);
         entry(values.oot_anti_aliasing, OotAntiAliasing::NoSharpening);
+        // The game's clock follows the frame rate limit: at 120 (set for a 120 Hz panel or a
+        // 60 fps mod) the game ran at double speed on a Legion Go S without the mod.
+        entry(values.frame_rate_limit, u16{60});
     }
     entry(values.use_multi_core, true);
     entry(values.memory_layout_mode, MemoryLayout::Memory_4Gb);

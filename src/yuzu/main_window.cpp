@@ -4336,7 +4336,14 @@ void MainWindow::OnApplyRecommendedSettings() {
     if (emulation_running) {
         return;
     }
-    const bool accepted = RecommendedSettingsDialog::Ask(this);
+    // (this fork) On a Legion Go S or another Ryzen Z1/Z2 handheld the first offer applies the
+    // values right away instead of asking: they are what that hardware needs (handheld mode,
+    // normal CPU clock, 60 fps limit, ...), and Help -> Restore My Previous Settings undoes them.
+    // The menu entry still asks.
+    const bool auto_apply = !Settings::values.recommended_settings_prompt_shown.GetValue() &&
+                            Settings::DetectHandheldDevice() ==
+                                Settings::HandheldDevice::AmdHandheld;
+    const bool accepted = auto_apply || RecommendedSettingsDialog::Ask(this);
     if (emulation_running) {
         // A game started behind the question; ask again when none runs.
         return;
