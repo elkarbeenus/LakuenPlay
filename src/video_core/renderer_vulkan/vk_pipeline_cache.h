@@ -342,6 +342,34 @@ private:
     std::stop_source serialization_stop;
     Common::ThreadWorker serialization_thread;
     DynamicFeatures dynamic_features;
+
+    // (this fork, shader cache v3) A graphics pipeline missing from the cache is translated on a
+    // worker thread while the GPU thread moves on: its draws are skipped until a later lookup
+    // adopts it. The environments are detached from the 3D engine first (GraphicsEnvironment::
+    // Detach). On a Steam Deck each miss held the GPU thread for 28-73 ms.
+    struct AsyncTranslation {
+        GraphicsPipelineCacheKey key;
+        GraphicsEnvironments environments;
+        std::shared_ptr<ShaderPools> pools;
+        bool native{};
+        std::unique_ptr<GraphicsPipeline> pipeline; ///< Null when the build failed
+        std::chrono::steady_clock::duration time{};
+    };
+    /// Whether the current draw may be skipped while its pipeline translates (GPU thread).
+    [[nodiscard]] bool CanSkipDrawForTranslation() const;
+    /// Queues graphics_key's translation; false (nothing queued) when it must translate here.
+    bool QueueAsyncTranslation();
+    /// Moves finished translations into graphics_cache and stores new ones (GPU thread).
+    void AdoptAsyncTranslations();
+    std::unordered_set<GraphicsPipelineCacheKey> async_translating; ///< GPU thread
+    std::mutex async_translated_mutex;
+    std::vector<std::shared_ptr<AsyncTranslation>> async_translated;
+    std::atomic<size_t> async_translated_count{};
+    u64 async_queued_total{};
+    u64 async_skipped_lookups{};
+    std::chrono::steady_clock::time_point async_report{};
+    /// Last: its threads are joined before the members above go.
+    std::unique_ptr<Common::ThreadWorker> async_translation_workers;
 };
 
 } // namespace Vulkan
