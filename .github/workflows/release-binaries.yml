@@ -113,22 +113,31 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v5
 
+      # The runner's Azure apt mirror sometimes hangs for hours (only "Ign:" lines). Every attempt has a hard time
+      # limit, and a stuck mirror is swapped for archive.ubuntu.com, then kernel.org.
       - name: Install Linux dependencies
         if: startsWith(matrix.platform, 'linux')
         shell: bash
+        timeout-minutes: 30
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            autoconf cmake g++ gcc git glslang-tools libglu1-mesa-dev \
-            libpulse-dev libtool libudev-dev libxkbcommon-x11-0 \
-            mesa-common-dev nasm ninja-build qt6-base-private-dev \
-            qt6-charts-dev qt6-tools-dev libavfilter-dev libavcodec-dev \
-            libswscale-dev pkg-config zlib1g-dev libva-dev libvdpau-dev \
-            spirv-tools spirv-headers libusb-1.0-0-dev \
-            libboost-dev libboost-fiber-dev libboost-context-dev \
-            libopus-dev libasound2-dev ccache \
-            libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
-            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 libxcb-xkb1
+          set -uo pipefail
+          PKGS="autoconf cmake g++ gcc git glslang-tools libglu1-mesa-dev libpulse-dev libtool libudev-dev libxkbcommon-x11-0 mesa-common-dev nasm ninja-build qt6-base-private-dev qt6-charts-dev qt6-tools-dev libavfilter-dev libavcodec-dev libswscale-dev pkg-config zlib1g-dev libva-dev libvdpau-dev spirv-tools spirv-headers libusb-1.0-0-dev libboost-dev libboost-fiber-dev libboost-context-dev libopus-dev libasound2-dev ccache libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 libxcb-xkb1"
+          APT="sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20"
+          try_install() {
+            timeout 480 $APT update && timeout 600 $APT install -y --no-install-recommends $PKGS
+          }
+          use_mirror() {
+            echo "::warning::apt mirror stuck, switching to $1"
+            for f in /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list; do
+              [ -f "$f" ] || continue
+              sudo sed -i -E "s#^URIs:.*#URIs: $1#; s#(deb(-src)? +)(mirror\+file:[^ ]+|https?://[^ ]+)#\1$1#" "$f"
+            done
+          }
+          try_install && exit 0
+          use_mirror http://archive.ubuntu.com/ubuntu/
+          try_install && exit 0
+          use_mirror http://mirrors.edge.kernel.org/ubuntu/
+          try_install
 
       # The packages docs/Deps.md lists for macOS, plus ccache.
       - name: Install macOS dependencies
