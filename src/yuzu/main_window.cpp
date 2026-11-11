@@ -1729,6 +1729,23 @@ void MainWindow::ConnectMenuEvents() {
             !Settings::values.recommended_settings_backup.GetValue().empty());
     });
     connect_menu(ui->action_Data_Manager, &MainWindow::OnDataDialog);
+    {
+        // (this fork, PC build) Per-game recommended settings for this PC, saved in the game's own
+        // configuration (Properties shows and changes them).
+        auto* menu = new QMenu(tr("Recommended Settings for This PC"), ui->menu_Help);
+        auto* pokopia = menu->addAction(tr("Pok\u00e9mon Pokopia"));
+        auto* ocarina = menu->addAction(tr("The Legend of Zelda: Ocarina of Time"));
+        ui->menu_Help->insertMenu(ui->action_Apply_Recommended_Settings, menu);
+        connect(pokopia, &QAction::triggered, this, [this] {
+            ApplyGamePcRecommendedSettings(Settings::PokopiaProgramId, tr("Pok\u00e9mon Pokopia"));
+        });
+        connect(ocarina, &QAction::triggered, this, [this] {
+            ApplyGamePcRecommendedSettings(Settings::OcarinaProgramId,
+                                           tr("The Legend of Zelda: Ocarina of Time"));
+        });
+        connect(ui->menu_Help, &QMenu::aboutToShow, menu,
+                [this, menu] { menu->setEnabled(!emulation_running); });
+    }
 
 #if defined(ENABLE_UPDATE_CHECKER) && (defined(__linux__) || defined(_WIN32))
     auto* restore_action = ui->menu_Help->addAction(tr("Restore Previous Version..."));
@@ -4330,6 +4347,36 @@ void MainWindow::OfferRecommendedSettings() {
         return;
     }
     OnApplyRecommendedSettings();
+}
+
+void MainWindow::ApplyGamePcRecommendedSettings(u64 title_id, const QString& name) {
+    if (emulation_running) {
+        return;
+    }
+    {
+        // Loads the game's configuration into the per-game values, as Properties does, and saves it
+        // with the recommended ones; the global values stay as they are.
+        QtConfig per_game(fmt::format("{:016X}", title_id), Config::ConfigType::PerGameConfig);
+        if (title_id == Settings::PokopiaProgramId) {
+            Settings::SetPokopiaPcRecommendedSettings(Settings::values);
+        } else {
+            Settings::SetOcarinaPcRecommendedSettings(Settings::values);
+        }
+        per_game.SaveAllValues();
+    }
+    Settings::RestoreGlobalState(false);
+    LOG_INFO(Config, "Saved the recommended PC settings for {:016X}", title_id);
+    const QString details =
+        title_id == Settings::PokopiaProgramId
+            ? tr("Docked, 1x resolution (1920x1080), 60 Hz at normal speed, frame generation x2 "
+                 "(120 fps on screen, the game does not run faster), asynchronous shaders and every "
+                 "cached shader built on the loading screen.")
+            : tr("Docked, 1x resolution (1920x1080), 60 Hz at normal speed, asynchronous shaders "
+                 "and every cached shader built on the loading screen.");
+    QMessageBox::information(this, tr("Recommended settings saved"),
+                             tr("%1 now starts with the recommended settings for this PC:\n\n%2"
+                                "\n\nChange them in the game's Properties.")
+                                 .arg(name, details));
 }
 
 void MainWindow::OnApplyRecommendedSettings() {

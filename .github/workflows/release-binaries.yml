@@ -53,7 +53,7 @@ permissions:
 env:
   PGO_LLVM_VERSION: "23"
   # File and artifact name of this OoT build (no umlaut in file names).
-  APP_LABEL: LakuenPlay-OoT-PC
+  APP_LABEL: LakuenPlay-PC
   # Release tag: the given version, or build-<run number> for automatic pre-releases.
   RELEASE_TAG: ${{ inputs.release_version || format('build-{0}', github.run_number) }}
 

@@ -25,7 +25,7 @@ extern const char g_compiler_id[];
 
 // Name of this OoT-tuned build in the window title, the log and the About dialog. It is based
 // on Lichii (build 130) and Eden; data folders and settings stay those of Lichii.
-inline constexpr const char g_app_label[] = "LaküenPlay – OoT PC";
+inline constexpr const char g_app_label[] = "LaküenPlay";
 
 extern const bool g_is_dev_build;
 extern const bool g_is_nightly_build;

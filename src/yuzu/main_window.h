@@ -408,6 +408,8 @@ private slots:
     void OnEdenDependencies();
     void OfferRecommendedSettings();
     void OnApplyRecommendedSettings();
+    /// (this fork, PC build) Saves the recommended PC settings in the game's own configuration.
+    void ApplyGamePcRecommendedSettings(u64 title_id, const QString& name);
     void OnRestorePreviousSettings();
     void OnDataDialog();
     void OnToggleFilterBar();
