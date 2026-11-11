@@ -2211,16 +2211,20 @@ void PipelineCache::EvictUnusedPipelines() {
                  static_cast<double>(unused_prebuilt_budget) * 0.45 / 1024.0, EvictAfterFrames);
         logged_budget = unused_prebuilt_budget;
     }
+    // (this fork, after Lichii #1334) Candidates are evicted least recently used first, and only as
+    // many as it takes to get back under the keep-all limit (or LowMemoryMaxEvictions when memory is
+    // critical): before, every pipeline past the age went at once, a revisited place's hundreds with
+    // them. EDEN_NX2_EVICT_LRU=0 evicts every candidate as before.
+    static const bool evict_lru = [] {
+        const char* value = std::getenv("EDEN_NX2_EVICT_LRU");
+        return value == nullptr || value[0] != '0';
+    }();
     size_t kept_prebuilt = 0;
-    size_t evicted = 0;
-    for (auto it = graphics_cache.begin(); it != graphics_cache.end();) {
-        GraphicsPipeline* const pipeline = it->second.get();
-        if (low_memory && evicted >= LowMemoryMaxEvictions) {
-            break;
-        }
+    std::vector<std::pair<u64, GraphicsPipelineCacheKey>> candidates;
+    for (const auto& [key, owned] : graphics_cache) {
+        GraphicsPipeline* const pipeline = owned.get();
         if (pipeline == nullptr || pipeline == current_pipeline || !pipeline->IsBuilt() ||
             pipeline->LastUse() >= cutoff) {
-            ++it;
             continue;
         }
         // A pipeline built from the disk cache at boot that no draw has used yet stays, up to a
@@ -2230,9 +2234,29 @@ void PipelineCache::EvictUnusedPipelines() {
         // large cache can't hold their driver memory for the whole session.
         if (!pipeline->WasUsed() && kept_prebuilt < unused_prebuilt_budget) {
             ++kept_prebuilt;
-            ++it;
             continue;
         }
+        candidates.emplace_back(pipeline->WasUsed() ? pipeline->LastUse() : 0, key);
+    }
+    size_t limit = candidates.size();
+    if (low_memory) {
+        limit = std::min(limit, LowMemoryMaxEvictions);
+    } else if (evict_lru && keep_all_below != 0) {
+        limit = std::min(limit, graphics_cache.size() > keep_all_below
+                                    ? graphics_cache.size() - keep_all_below
+                                    : size_t{0});
+    }
+    if (evict_lru || low_memory) {
+        std::ranges::stable_sort(candidates, {}, &std::pair<u64, GraphicsPipelineCacheKey>::first);
+    }
+    candidates.resize(limit);
+    size_t evicted = 0;
+    for (const auto& [last_use, key] : candidates) {
+        const auto it = graphics_cache.find(key);
+        if (it == graphics_cache.end() || !it->second) {
+            continue;
+        }
+        GraphicsPipeline* const pipeline = it->second.get();
         if (used_this_session.erase(pipeline) != 0) {
             used_and_evicted.insert(it->first.Hash());
         }
@@ -2241,7 +2265,7 @@ void PipelineCache::EvictUnusedPipelines() {
         const u64 bytes = kept.Bytes();
         kept_stages.Add(it->first, std::move(kept), bytes);
         evicted_pipelines.emplace_back(tick, std::move(it->second));
-        it = graphics_cache.erase(it);
+        graphics_cache.erase(it);
         ++evicted;
     }
     if (evicted == 0) {
