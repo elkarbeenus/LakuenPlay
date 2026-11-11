@@ -6,6 +6,7 @@
 #include "qt_common/util/game.h"
 
 #include "common/fs/fs.h"
+#include "common/fs/path_util.h"
 #include "core/hle/service/acc/profile_manager.h"
 #include "frontend_common/content_manager.h"
 #include "frontend_common/data_manager.h"
@@ -17,6 +18,7 @@
 #include "qt_common/qt_common.h"
 
 #include <JlCompress.h>
+#include <QFile>
 #include <QFuture>
 #include <QFutureWatcher>
 #include <QtConcurrentRun>
@@ -582,6 +584,95 @@ void configureFilesystemProvider(const std::string& filepath) {
             }
         }
     }
+}
+
+
+// Save data transfer (LaküenPlay) //
+namespace {
+bool DirHasFiles(const std::filesystem::path& dir) {
+    std::error_code ec;
+    if (!std::filesystem::is_directory(dir, ec)) {
+        return false;
+    }
+    for (auto it = std::filesystem::recursive_directory_iterator(dir, ec);
+         !ec && it != std::filesystem::recursive_directory_iterator(); it.increment(ec)) {
+        if (it->is_regular_file(ec)) {
+            return true;
+        }
+    }
+    return false;
+}
+const auto always_go_on = [](std::size_t, std::size_t) { return true; };
+} // Anonymous namespace
+
+QString ExportSaveDir(const std::filesystem::path& save_dir, const QString& zip_path) {
+    if (!DirHasFiles(save_dir)) {
+        return tr("This game has no save data yet for the current user.");
+    }
+    (void)QFile::remove(zip_path);
+    if (!QtCommon::Compress::compressDir(zip_path,
+                                         QString::fromStdString(Common::FS::PathToUTF8String(save_dir)),
+                                         QtCommon::Compress::Options(), always_go_on)) {
+        return tr("The zip file could not be written.");
+    }
+    return {};
+}
+
+QString ImportSaveDir(const std::filesystem::path& save_dir, const QString& zip_path,
+                      const std::filesystem::path& backup_zip) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const fs::path tmp = save_dir.parent_path() / (save_dir.filename().string() + ".import");
+    fs::remove_all(tmp, ec);
+    if (!fs::create_directories(tmp, ec)) {
+        return tr("A temporary folder beside the save data could not be made.");
+    }
+    const auto cleanup = [&tmp] {
+        std::error_code ignored;
+        fs::remove_all(tmp, ignored);
+    };
+    QtCommon::Compress::extractDir(zip_path, QString::fromStdString(Common::FS::PathToUTF8String(tmp)),
+                                   always_go_on);
+    // A zip of the folder itself holds one folder and nothing else: its contents are the save.
+    fs::path source = tmp;
+    for (int depth = 0; depth < 4; ++depth) {
+        std::vector<fs::path> entries;
+        for (const auto& entry : fs::directory_iterator(source, ec)) {
+            entries.push_back(entry.path());
+        }
+        if (entries.size() == 1 && fs::is_directory(entries[0], ec)) {
+            source = entries[0];
+        } else {
+            break;
+        }
+    }
+    if (!DirHasFiles(source)) {
+        cleanup();
+        return tr("The zip file holds no save data.");
+    }
+    if (DirHasFiles(save_dir)) {
+        fs::create_directories(backup_zip.parent_path(), ec);
+        const QString backup = QString::fromStdString(Common::FS::PathToUTF8String(backup_zip));
+        if (!ExportSaveDir(save_dir, backup).isEmpty()) {
+            cleanup();
+            return tr("The current save data could not be backed up, so nothing was changed.");
+        }
+    }
+    fs::remove_all(save_dir, ec);
+    fs::create_directories(save_dir.parent_path(), ec);
+    fs::rename(source, save_dir, ec);
+    if (ec) {
+        // (another file system: copy instead)
+        ec.clear();
+        fs::create_directories(save_dir, ec);
+        fs::copy(source, save_dir, fs::copy_options::recursive | fs::copy_options::overwrite_existing, ec);
+    }
+    cleanup();
+    if (ec || !DirHasFiles(save_dir)) {
+        return tr("The save data could not be put in place. The previous save is in %1.")
+            .arg(QString::fromStdString(Common::FS::PathToUTF8String(backup_zip)));
+    }
+    return {};
 }
 
 } // namespace QtCommon::Content
