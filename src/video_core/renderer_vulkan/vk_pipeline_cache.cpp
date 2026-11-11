@@ -2098,7 +2098,8 @@ void PipelineCache::TickFrame() {
         retired_compute_pipelines.pop_front();
     }
     constexpr u64 EvictCheckFrames = 600;
-    if (frame_count % EvictCheckFrames == 0) {
+    if (frame_count % EvictCheckFrames == 0 ||
+        (frame_count % 120 == 0 && Common::IsMemoryLow())) {
         EvictUnusedPipelines();
     }
 }
@@ -2128,7 +2129,15 @@ void PipelineCache::EvictUnusedPipelines() {
     // 12 GB RTX 3080: 282 eviction sweeps in a 70-minute session, single frames up to 1.36 s
     // while evicted pipelines were translated again). 27000 frames is ~7.5 min at 60 fps.
     constexpr u64 EvictAfterFrames = 27000;
-    if (frame_count <= EvictAfterFrames) {
+    // (this fork) Short of memory, pipelines unused for a minute at 30 fps go, whatever the limits
+    // below: each holds ~0.45 MB of driver memory, and with the boot precache and nothing evicted
+    // a Steam Deck kept thousands while it ran out of memory entering Castle Town.
+    constexpr u64 LowMemoryEvictAfterFrames = 1800;
+    const bool low_memory = Common::IsMemoryLow();
+    if (!low_memory && frame_count <= EvictAfterFrames) {
+        return;
+    }
+    if (low_memory && frame_count <= LowMemoryEvictAfterFrames) {
         return;
     }
     // (handheld build) A Steam Deck runs ~30 fps, so 27000 frames is only ~15 minutes, and a
@@ -2142,10 +2151,10 @@ void PipelineCache::EvictUnusedPipelines() {
         return value != nullptr ? static_cast<size_t>(std::strtoull(value, nullptr, 10))
                                 : size_t{6000};
     }();
-    if (graphics_cache.size() < keep_all_below) {
+    if (!low_memory && graphics_cache.size() < keep_all_below) {
         return;
     }
-    const u64 cutoff = frame_count - EvictAfterFrames;
+    const u64 cutoff = frame_count - (low_memory ? LowMemoryEvictAfterFrames : EvictAfterFrames);
     const u64 tick = scheduler.CurrentTick();
     // The budget of never-used prebuilt pipelines scales with the device's memory: one pipeline
     // per 3 MiB of video memory (~15% of it at ~0.45 MB each), between the old flat floor of
@@ -2157,8 +2166,9 @@ void PipelineCache::EvictUnusedPipelines() {
     constexpr size_t MinUnusedPrebuiltPipelines = 2000;
     constexpr size_t MaxUnusedPrebuiltPipelines = 10000;
     const size_t unused_prebuilt_budget =
-        std::clamp<size_t>(device.GetDeviceLocalMemory() / (size_t{3} << 20),
-                           MinUnusedPrebuiltPipelines, MaxUnusedPrebuiltPipelines);
+        low_memory ? size_t{300}
+                   : std::clamp<size_t>(device.GetDeviceLocalMemory() / (size_t{3} << 20),
+                                        MinUnusedPrebuiltPipelines, MaxUnusedPrebuiltPipelines);
     static size_t logged_budget = 0;
     if (logged_budget != unused_prebuilt_budget) {
         LOG_INFO(Render_Vulkan,

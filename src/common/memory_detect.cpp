@@ -18,7 +18,9 @@
 #endif
 #endif
 
+#include <atomic>
 #include <charconv>
+#include <cstdlib>
 #include <string_view>
 
 #ifdef __linux__
@@ -192,6 +194,44 @@ HeapTrimResult TrimHeap([[maybe_unused]] std::string_view reason) {
              released != 0 ? "" : " (nothing to release)");
 #endif
     return result;
+}
+
+u64 GetMemAvailableCached() {
+#ifdef __linux__
+    static std::atomic<u64> available{};
+    static std::atomic<s64> read_at{};
+    const s64 now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now().time_since_epoch())
+                        .count();
+    s64 last = read_at.load(std::memory_order_relaxed);
+    if (now - last >= 500 &&
+        read_at.compare_exchange_strong(last, now, std::memory_order_relaxed)) {
+        std::ifstream file{"/proc/meminfo"};
+        const std::string text{std::istreambuf_iterator<char>{file}, {}};
+        available.store(ProcKilobytesField(text, "MemAvailable:"), std::memory_order_relaxed);
+    }
+    return available.load(std::memory_order_relaxed);
+#else
+    return 0;
+#endif
+}
+
+bool IsMemoryLow() {
+    static const u64 threshold = [] {
+        const char* const value = std::getenv("EDEN_NX2_LOW_MEMORY_MIB");
+        return (value != nullptr ? std::strtoull(value, nullptr, 10) : u64{2560}) << 20;
+    }();
+    if (threshold == 0) {
+        return false;
+    }
+    const u64 available = GetMemAvailableCached();
+    const bool low = available != 0 && available < threshold;
+    static std::atomic<bool> was_low{};
+    if (low != was_low.exchange(low, std::memory_order_relaxed)) {
+        LOG_WARNING(Common, "{} memory: {} MiB available (threshold {} MiB)",
+                    low ? "Low" : "Enough", available >> 20, threshold >> 20);
+    }
+    return low;
 }
 
 } // namespace Common

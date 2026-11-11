@@ -359,6 +359,11 @@ void TextureCache<P>::ApplyThresholdOverrides(bool log) {
     }();
     if (low_ram) {
         max_critical = (std::min)(max_critical, u64{3584_MiB});
+        // A Steam Deck leaves the system 14.5 GiB (the rest is the GPU's carve-out) and shares it
+        // with the GPU: 3 GiB there.
+        if (Common::GetMemInfo().TotalPhysicalMemory <= (u64{15} << 30)) {
+            max_critical = (std::min)(max_critical, u64{3072_MiB});
+        }
     }
     critical_memory = (std::min)(critical_memory, max_critical);
     expected_memory =
@@ -675,8 +680,11 @@ void TextureCache<P>::TickFrame() {
         out_of_memory = failed != seen_failed_images;
         seen_failed_images = failed;
     }
-    if (out_of_memory || total_used_memory > minimum_memory) {
-        RunGarbageCollector(out_of_memory);
+    // (this fork) The host short of memory (a Steam Deck entering Castle Town ran out and the
+    // kernel ended the emulator) collects as when an image could not be made.
+    const bool host_low = total_used_memory > minimum_memory && Common::IsMemoryLow();
+    if (out_of_memory || host_low || total_used_memory > minimum_memory) {
+        RunGarbageCollector(out_of_memory || host_low);
     }
     if (out_of_memory) {
         // Textures left out for lack of memory are made again on their next read, once a frame

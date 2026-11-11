@@ -56,4 +56,13 @@ struct HeapTrimResult {
 /// for that slice: call it off the GPU thread. Does nothing elsewhere.
 HeapTrimResult TrimHeap(std::string_view reason);
 
+/// (this fork) Bytes the system can still hand out without swapping (Linux MemAvailable), read
+/// again at most every 500 ms. 0 where the host doesn't say.
+[[nodiscard]] u64 GetMemAvailableCached();
+
+/// (this fork) Whether the host is short of memory: MemAvailable below 2.5 GiB
+/// (EDEN_NX2_LOW_MEMORY_MIB=<MiB>, 0 never). The caches give memory back while it holds: a Steam
+/// Deck (14.5 GiB for the system) ran out entering Castle Town and the kernel ended the emulator.
+[[nodiscard]] bool IsMemoryLow();
+
 } // namespace Common
