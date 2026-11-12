@@ -11,9 +11,9 @@ on:
         type: string
         default: ""
       publish_release:
-        description: Publish the binaries as a GitHub release
+        description: "Publish the binaries as a GitHub release (only for agreed releases; test builds stay as run artifacts)"
         type: boolean
-        default: true
+        default: false
       pgo_mode:
         description: "PGO build (Linux): use = with the profile (oot-linux.profdata if present), generate = an instrumented build that records a profile to /home/deck/lichii-pgo"
         type: choice
