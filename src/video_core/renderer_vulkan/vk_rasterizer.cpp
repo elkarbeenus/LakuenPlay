@@ -2685,6 +2685,8 @@ void RasterizerVulkan::InnerInvalidation(std::span<const std::pair<DAddr, std::s
     }
     {
         std::scoped_lock lock{buffer_cache.mutex};
+        // As OnCacheInvalidations: out of the GPU-written ranges first (Lichii #1460).
+        buffer_cache.ClaimCpuWrites(sequences);
         for (const auto& [addr, size] : sequences) {
             buffer_cache.WriteMemory(addr, size, true, true);
         }
