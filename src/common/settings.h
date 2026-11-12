@@ -499,10 +499,11 @@ struct Values {
                                                    false,
                                                    &frame_gen};
 
+    // (LaküenPlay) at most x2: a 30 fps game shown at 60, generated frames spaced between the real ones (Lichii #1493)
     SwitchableSetting<u32, true> frame_gen_multiplier{linkage,
                                                       2,
                                                       2,
-                                                      4,
+                                                      2,
                                                       "frame_gen_multiplier",
                                                       Category::Renderer,
                                                       Specialization::Countable,
@@ -1144,7 +1145,7 @@ void SetAppliedOcarinaRenderScale(std::optional<NvidiaDlssQuality> quality);
 std::optional<NvidiaDlssQuality> AppliedOcarinaRenderScale();
 
 constexpr u32 MIN_FRAME_GEN_MULTIPLIER = 2;
-constexpr u32 MAX_FRAME_GEN_MULTIPLIER = 4;
+constexpr u32 MAX_FRAME_GEN_MULTIPLIER = 2;   // (LaküenPlay: x2 at most)
 
 [[nodiscard]] u32 FrameGenMultiplier();
 
