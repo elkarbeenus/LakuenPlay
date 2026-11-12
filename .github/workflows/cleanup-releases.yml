@@ -1,0 +1,35 @@
+# (this fork) Removes the automatic test-build releases (tags build-N), so the releases page only
+# lists the agreed LaküenPlay releases (v*). The git tags and the Actions runs stay.
+name: Clean up test-build releases
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Only list what would be removed
+        type: boolean
+        default: true
+permissions:
+  contents: write
+jobs:
+  cleanup:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Remove build-N releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            --jq '.[] | select(.tag_name | test("^build-[0-9]+$")) | .tag_name' > tags.txt
+          echo "Test-build releases: $(wc -l < tags.txt)"
+          while read -r tag; do
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "would remove the release $tag"
+            else
+              gh release delete "$tag" --repo "${GITHUB_REPOSITORY}" --yes
+              echo "removed the release $tag (tag kept)"
+            fi
+          done < tags.txt
+          echo "Remaining releases:"
+          gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" --jq '.[] | "  \(.tag_name)  \(.name)"'
