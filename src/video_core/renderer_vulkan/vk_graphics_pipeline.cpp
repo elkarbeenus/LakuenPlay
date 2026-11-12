@@ -448,6 +448,15 @@ GraphicsPipeline::GraphicsPipeline(
     if (IsMeshPipeline()) {
         block(DeltaBlocker::Mesh);
     }
+    // (LaküenPlay handheld) A table of handles the shader indexes (Lichii #1485) is read for every
+    // element at draw time and not recorded for ComputedHandlesChanged: no delta draws for it.
+    if (std::ranges::any_of(stage_infos, [](const Shader::Info& info) {
+            return std::ranges::any_of(info.texture_descriptors, [](const auto& desc) {
+                return desc.count > 1 && desc.handle_program != ~0U;
+            });
+        })) {
+        block(DeltaBlocker::ComputedHandles);
+    }
     for (size_t stage = 0; stage < NUM_STAGES; ++stage) {
         const Shader::Info& info = stage_infos[stage];
         u32& handles = handle_constant_buffers[stage];
@@ -815,6 +824,9 @@ bool GraphicsPipeline::ConfigureImpl(bool is_indexed) {
             }
         }
         const auto& cbufs{maxwell3d->state.shader_stages[stage].const_buffers};
+        const auto cbuf_address{[&cbufs](u32 cbuf) -> GPUVAddr {
+            return cbuf < cbufs.size() && cbufs[cbuf].enabled ? cbufs[cbuf].address : GPUVAddr{};
+        }};
         const auto read_handle{[&](const auto& desc, u32 index) {
             if (desc.handle_program != ~0U) {
                 // Read by the shader from a storage buffer: computed for this draw.
@@ -824,7 +836,7 @@ bool GraphicsPipeline::ConfigureImpl(bool is_indexed) {
                         return cbuf < cbufs.size() && cbufs[cbuf].enabled ? cbufs[cbuf].address
                                                                           : GPUVAddr{};
                     },
-                    device.GetStorageBufferAlignment())};
+                    device.GetStorageBufferAlignment(), index)};
                 using Desc = std::remove_cvref_t<decltype(desc)>;
                 const auto [kind, first] = [&]() -> std::pair<ComputedHandleKind, const Desc*> {
                     if constexpr (std::is_same_v<Desc, Shader::TextureBufferDescriptor>) {
@@ -888,7 +900,37 @@ bool GraphicsPipeline::ConfigureImpl(bool is_indexed) {
             }
         }
         if (resolve_in_full) {
+            u32 texture{};
             for (const auto& desc : info.texture_descriptors) {
+                if (desc.count > 1 && desc.handle_program != ~0U) {
+                    // A table of handles the shader indexes (one shadow map per light, say), read
+                    // in one go; elements repeating a sampler share its lookup. A pipeline with
+                    // handle programs never takes the texture memo (texture_memo_eligible).
+                    const size_t first{views.size()};
+                    u32 last_sampler_index{~0U};
+                    VideoCommon::SamplerId sampler{};
+                    VideoCommon::EvaluateTextureHandles(
+                        info, desc.handle_program, *gpu_memory, cbuf_address,
+                        device.GetStorageBufferAlignment(), desc.count, [&](u32, u32 raw) {
+                            const auto handle{TexturePair(raw, via_header_index)};
+                            views.push_back({handle.first});
+                            if (handle.second != last_sampler_index) {
+                                sampler = texture_cache.GetSamplerId(handle.second, false);
+                                last_sampler_index = handle.second;
+                            }
+                            samplers.push_back(sampler);
+                        });
+                    if (VideoCommon::HandleTableNotes::Wanted()) {
+                        std::vector<u32> tics(desc.count);
+                        for (u32 index = 0; index < desc.count; ++index) {
+                            tics[index] = views[first + index].index;
+                        }
+                        VideoCommon::HandleTableNotes::Note(key.unique_hashes[stage + 1], texture,
+                                                            tics);
+                    }
+                    ++texture;
+                    continue;
+                }
                 for (u32 index = 0; index < desc.count; ++index) {
                     const auto handle{VideoCommon::HandleIsStoragePointer(info, desc, index)
                                           ? VideoCommon::NULL_TEXTURE_HANDLE
@@ -903,6 +945,7 @@ bool GraphicsPipeline::ConfigureImpl(bool is_indexed) {
                              via_header_index ? handle.first : handle.first | (handle.second << 20)});
                     }
                 }
+                ++texture;
             }
         }
         if constexpr (Spec::has_images) {
