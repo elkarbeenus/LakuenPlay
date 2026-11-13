@@ -25,7 +25,7 @@ Make the AppImage executable (`chmod +x LakuenPlay-*.AppImage`) and run it. It n
 ## This fork's handheld changes
 
 ### Memory (16 GB shared between the system and the GPU)
-- **Idle all-zero guest pages are freed on Linux too** (Lichii frees them on Windows only): games clear several GB of their heaps while booting. A pass also hands the emulator's freed heap back to the system. It comes early after an area change or when RAM runs short.
+- **(Off by default since v1.0.2: it froze a Steam Deck.)** **Idle all-zero guest pages are freed on Linux too** (Lichii frees them on Windows only): games clear several GB of their heaps while booting. A pass also hands the emulator's freed heap back to the system. It comes early after an area change or when RAM runs short.
 - **Memory guard:** below 2.5 GiB available the textures collect as if out of memory and the heap is trimmed; below 1.5 GiB pipelines unused for a few minutes go, slowly. Before, a Steam Deck could run out of memory entering an area and the system ended the emulator.
 - **Textures stop at 3 GiB** on 15 GiB hosts (Steam Deck), 3.5 GiB on 16 GB machines, also on integrated GPUs, where the cache had grown to 4-5 GiB. An integrated GPU's memory share bounds the textures alone, not everything in device memory ([Lichii #823](https://github.com/zortos293/Lichii/pull/823)).
 - **Freed heap goes back to Linux** after the boot builds and evictions (port of [Lichii #1271](https://github.com/zortos293/Lichii/pull/1271)); the texture cache collects faster the further past its limit (port of [#1306](https://github.com/zortos293/Lichii/pull/1306)); the shader cache file is mapped instead of copied into the heap.
