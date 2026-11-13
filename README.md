@@ -22,7 +22,7 @@
 
 ---
 
-LaküenPlay is an unofficial, experimental fork of **Lichii**, the open-source Nintendo Switch and Switch 2 emulator. It starts from Lichii **build 130** and adds performance, memory and stability work for Linux. It focuses on two targets: a desktop build, and a handheld build for AMD's low-power APUs.
+LaküenPlay is an unofficial, experimental fork of **Lichii**, the open-source Nintendo Switch and Switch 2 emulator. The PC build starts from Lichii **build 130**, the handheld build from a current Lichii (`nx2`, past build 160); both add performance, memory and stability work for Linux. It focuses on two targets: a desktop build, and a handheld build for AMD's low-power APUs.
 
 Almost everything here builds on other people's work. Lichii, Eglantine, Eden, yuzu and Sudachi did the hard part; this fork collects, ports and tunes. See [Credits](#credits).
 
@@ -45,14 +45,16 @@ Almost everything here builds on other people's work. Lichii, Eglantine, Eden, y
 | Build | Branch | Target hardware | CPU baseline |
 | --- | --- | --- | --- |
 | **PC** | [`build_130_better_ram`](../../tree/build_130_better_ram) | Desktop Linux / SteamOS PCs | generic x86-64 |
-| **Handheld** | [`build_130_handheld_1161`](../../tree/build_130_handheld_1161) | Steam Deck (LCD/OLED), Legion Go S (Z2 Go) and similar AMD handhelds | Zen 2 and newer |
+| **Handheld** | [`build_nx2_handheld_v11`](../../tree/build_nx2_handheld_v11) (base: Lichii `nx2` of 2026-11-13, past build 160) | Steam Deck (LCD/OLED), Legion Go S (Z2 Go) and similar AMD handhelds | Zen 2 and newer |
 
 Each build ships as a self-contained **AppImage** in two variants:
 
 - **PGO** (recommended): the same program compiled with profile-guided optimization, using a profile recorded on the target hardware.
 - **Standard**: no profile, for comparison or if the PGO build misbehaves.
 
-**⬇️ Latest release: [LaküenPlay v1.2 – PC](../../releases/tag/v1.2)** (`LakuenPlay-v1.2-PC-x86_64-pgo.AppImage` is recommended). The handheld build is still in testing.
+**⬇️ Latest releases:**
+- **PC:** [LaküenPlay v1.2 – PC](../../releases/tag/v1.2) (`LakuenPlay-v1.2-PC-x86_64-pgo.AppImage` is recommended)
+- **Handheld:** [LaküenPlay v1.0 – Handheld](../../releases/tag/handheld-v1.0) (`LakuenPlay-v1.0-Handheld-x86_64-pgo.AppImage` is recommended; Steam Deck, Legion Go S and other Zen 2+ handhelds)
 
 Test builds are produced by [GitHub Actions](../../actions/workflows/release-binaries.yml), and every run is titled with what it contains. Downloading an artifact needs a GitHub login.
 
