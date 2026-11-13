@@ -1,6 +1,6 @@
 name: release-binaries
 # (this fork) The run title says what the build contains: the note given at dispatch, else the branch.
-run-name: "${{ inputs.note || github.ref_name }}"
+run-name: "${{ inputs.note || github.ref_name }} · ${{ inputs.device == 'legion_go_s' && 'Legion Go S' || 'Steam Deck' }} · PGO ${{ inputs.pgo_mode == 'generate' && 'Mess-Build (instrumentiert)' || 'normal' }}"
 
 on:
   workflow_dispatch:
@@ -13,6 +13,20 @@ on:
         description: "Publish the binaries as a GitHub release (only for agreed releases; test builds stay as run artifacts)"
         type: boolean
         default: false
+      device:
+        description: "Device the build is compiled for: steamdeck = Zen 2 (runs on every Zen 2+ handheld), legion_go_s = Zen 3 (Ryzen Z2 Go)"
+        type: choice
+        options:
+          - steamdeck
+          - legion_go_s
+        default: steamdeck
+      pgo_mode:
+        description: "PGO build: use = with the device's profile, generate = an instrumented build that records a profile to /home/deck/lichii-pgo"
+        type: choice
+        options:
+          - use
+          - generate
+        default: use
       release_version:
         description: "Versioned release (e.g. v1.0): tag and title use it, notes come from .github/release-notes/<version>-<device>.md. Empty = automatic build-N pre-release"
         type: string
@@ -45,13 +59,16 @@ permissions:
 env:
   PGO_LLVM_VERSION: "23"
   # (this fork) File and artifact name of the handheld build (no umlaut in file names).
-  APP_LABEL: LakuenPlay-Handheld
+  APP_LABEL: ${{ inputs.device == 'legion_go_s' && 'LakuenPlay-LegionGoS' || 'LakuenPlay-Handheld' }}
+  # (this fork) the CPU the build is compiled for, and the folder of its recorded profiles
+  BUILD_PRESET: ${{ inputs.device == 'legion_go_s' && 'zen3' || 'zen2' }}
+  PGO_DIR: ${{ inputs.device == 'legion_go_s' && 'pgo/legion_go_s' || 'pgo' }}
   RELEASE_TAG: ${{ inputs.release_version || format('build-{0}', github.run_number) }}
 
 # A running build is never cancelled: it finishes and publishes. A push meanwhile queues one build;
 # a later push replaces it, so the newest commit builds as soon as the running one is done.
 concurrency:
-  group: release-binaries-${{ github.ref }}
+  group: release-binaries-${{ github.ref }}-${{ inputs.device }}-${{ inputs.pgo_mode }}
   cancel-in-progress: false
 
 jobs:
@@ -190,17 +207,23 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             "clang-$PGO_LLVM_VERSION" "lld-$PGO_LLVM_VERSION" "llvm-$PGO_LLVM_VERSION"
+          # The instrumented build links clang's profile runtime (libclang_rt.profile.a).
+          if [ '${{ inputs.pgo_mode }}' = 'generate' ]; then
+            sudo apt-get install -y --no-install-recommends "libclang-rt-$PGO_LLVM_VERSION-dev"
+          fi
           "clang-$PGO_LLVM_VERSION" --version
 
       # (this fork) Raw profiles recorded on a Steam Deck are kept in pgo/ as .profraw.xz or .profraw.zst; they are
       # merged into oot-linux.profdata, which the Linux PGO build then uses in place of eglantine.profdata.
       - name: Merge the handheld profile
-        if: startsWith(matrix.platform, 'linux') && matrix.pgo
+        if: startsWith(matrix.platform, 'linux') && matrix.pgo && inputs.pgo_mode != 'generate'
         shell: bash
         run: |
           set -euo pipefail
           shopt -s nullglob
-          raw=(pgo/*.profraw.zst pgo/*.profraw.xz)
+          raw=("$PGO_DIR"/*.profraw.zst "$PGO_DIR"/*.profraw.xz)
+          # (a device without profiles of its own yet takes the Steam Deck's)
+          [ ${#raw[@]} -eq 0 ] && raw=(pgo/*.profraw.zst pgo/*.profraw.xz)
           if [ ${#raw[@]} -eq 0 ]; then
             echo "No raw profiles in pgo/: eglantine.profdata"
             exit 0
@@ -287,10 +310,10 @@ jobs:
             .sccache
           # The profile's hash is part of the key, so objects built against an older profile are
           # never restored.
-          key: objects-${{ matrix.platform }}${{ matrix.profile && format('-{0}', hashFiles(matrix.profile)) || '' }}-v2-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: objects-${{ matrix.platform }}${{ inputs.device == 'legion_go_s' && '-zen3' || '' }}${{ (matrix.pgo && inputs.pgo_mode == 'generate') && '-instrumented' || '' }}${{ matrix.profile && format('-{0}', hashFiles(matrix.profile)) || '' }}-v2-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            objects-${{ matrix.platform }}${{ matrix.profile && format('-{0}', hashFiles(matrix.profile)) || '' }}-v2-${{ github.sha }}-
-            objects-${{ matrix.platform }}${{ matrix.profile && format('-{0}', hashFiles(matrix.profile)) || '' }}-v2-
+            objects-${{ matrix.platform }}${{ inputs.device == 'legion_go_s' && '-zen3' || '' }}${{ (matrix.pgo && inputs.pgo_mode == 'generate') && '-instrumented' || '' }}${{ matrix.profile && format('-{0}', hashFiles(matrix.profile)) || '' }}-v2-${{ github.sha }}-
+            objects-${{ matrix.platform }}${{ inputs.device == 'legion_go_s' && '-zen3' || '' }}${{ (matrix.pgo && inputs.pgo_mode == 'generate') && '-instrumented' || '' }}${{ matrix.profile && format('-{0}', hashFiles(matrix.profile)) || '' }}-v2-
 
       - name: Configure Linux
         if: startsWith(matrix.platform, 'linux')
@@ -316,19 +339,27 @@ jobs:
             -DUSE_DISCORD_PRESENCE=OFF
             -DUSE_CCACHE=ON
             # (this fork, handheld) Zen 2 code: the Steam Deck is Zen 2, the Legion Go S (Z2 Go) Zen 3+.
-            -DLICHII_BUILD_PRESET=zen2
+            -DLICHII_BUILD_PRESET=${{ env.BUILD_PRESET }}
           )
           if [ '${{ matrix.pgo }}' = 'true' ]; then
             # Same flags Eden's CI passes for its clang PGO build.
+            linker_extra=""
+            if [ '${{ inputs.pgo_mode }}' = 'generate' ]; then
+              # (this fork) instrumented: raw profiles written on a clean exit
+              profile="-fprofile-generate=/home/deck/lichii-pgo -Wno-backend-plugin"
+              linker_extra=" -fprofile-generate=/home/deck/lichii-pgo"
+              echo "PGO: instrumented build (profiles to /home/deck/lichii-pgo)"
+            else
             profdata=eglantine.profdata
             [ -s oot-linux.profdata ] && profdata=oot-linux.profdata   # (this fork: the handheld profile when merged)
             echo "PGO profile: $profdata"
             profile="-fprofile-use=$PWD/$profdata -Wno-backend-plugin \
               -Wno-profile-instr-unprofiled -Wno-profile-instr-out-of-date"
+            fi
             flags+=(
               "-DCMAKE_C_COMPILER=clang-$PGO_LLVM_VERSION"
               "-DCMAKE_CXX_COMPILER=clang++-$PGO_LLVM_VERSION"
-              "-DCMAKE_EXE_LINKER_FLAGS=-B/usr/lib/llvm-$PGO_LLVM_VERSION/bin -fuse-ld=lld"
+              "-DCMAKE_EXE_LINKER_FLAGS=-B/usr/lib/llvm-$PGO_LLVM_VERSION/bin -fuse-ld=lld$linker_extra"
               "-DCMAKE_C_FLAGS=$profile"
               "-DCMAKE_CXX_FLAGS=$profile"
             )
@@ -620,7 +651,7 @@ jobs:
         if: startsWith(matrix.platform, 'linux')
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ env.APP_LABEL }}-build-${{ github.run_number }}-${{ matrix.platform }}-${{ github.sha }}
+          name: ${{ env.APP_LABEL }}-build-${{ github.run_number }}-${{ matrix.platform }}${{ (matrix.pgo && inputs.pgo_mode == 'generate') && '-instrumented' || '' }}-${{ github.sha }}
           path: |
             lichii-${{ github.sha }}-${{ matrix.platform }}.tar.gz
             ${{ env.APP_LABEL }}-build-*-${{ matrix.platform }}.AppImage
