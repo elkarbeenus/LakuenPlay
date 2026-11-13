@@ -25,11 +25,6 @@
 #include <iterator>
 #include <string>
 #include <string_view>
-
-#ifdef __linux__
-#include <fstream>
-#include <iterator>
-#include <string>
 #endif
 
 #include <atomic>
