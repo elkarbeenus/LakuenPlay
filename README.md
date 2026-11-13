@@ -56,6 +56,26 @@ Each build ships as a self-contained **AppImage** in two variants:
 - **PC:** [LaküenPlay v1.2 – PC](../../releases/tag/v1.2) (`LakuenPlay-v1.2-PC-x86_64-pgo.AppImage` is recommended)
 - **Handheld:** [LaküenPlay v1.0.2 – Handheld](../../releases/tag/handheld-v1.0.2) (`LakuenPlay-v1.0.2-Handheld-x86_64-pgo.AppImage` is recommended; Steam Deck, Legion Go S and other Zen 2+ handhelds)
 
+### What LaküenPlay adds
+
+Compared with [Lichii](https://github.com/zortos293/Lichii) itself:
+
+| | LaküenPlay PC (v1.2) | LaküenPlay Handheld (v1.0.2) | Lichii |
+|---|:-:|:-:|:-:|
+| Memory guard for 16 GB shared RAM (caches give memory back below 2.5 / 1.5 GiB free) | – | ✅ | – |
+| Texture cache capped at 3–3.5 GiB on 16 GB machines, also on integrated GPUs | ✅ | ✅ | – |
+| Freed heap handed back to Linux after the boot builds and evictions | ✅ | ✅ | – |
+| Idle all-zero guest memory freed on Linux (Lichii: Windows only) | ✅ | ⚙️ off by default | – |
+| Shader cache file mapped instead of copied into RAM (Linux) | ✅ | ✅ | – |
+| Pipeline misses during play translate their stages in parallel | ✅ | ✅ | – |
+| Compiled for the device's CPU (Zen 2, Zen 3 for the Legion Go S) with a PGO profile recorded on that hardware | Ryzen 7 5800X3D profile | Steam Deck profile | generic x86-64 |
+| Frame generation held at 2x with evenly spaced frames | – | ✅ | up to 4x |
+| Save Data Transfer (a game's save as a zip, backed up before an import) | ✅ | ✅ | – |
+| The log written out on a crash or a GPU device loss | ✅ | ✅ | – |
+| Linux-only CI: AppImages for desktop and handheld, no other platforms | ✅ | ✅ | Windows, Linux, macOS, Android |
+
+⚙️ `EDEN_NX2_ZERO_TRIM=1` turns it on. Every change can be switched off with an environment variable.
+
 Test builds are produced by [GitHub Actions](../../actions/workflows/release-binaries.yml), and every run is titled with what it contains. Downloading an artifact needs a GitHub login.
 
 ## What changed since Lichii build 130
