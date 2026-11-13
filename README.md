@@ -69,7 +69,7 @@ Compared with [Lichii](https://github.com/zortos293/Lichii) itself:
 | Shader cache file mapped instead of copied into RAM (Linux) | ✅ | ✅ | – |
 | Pipeline misses during play translate their stages in parallel | ✅ | ✅ | – |
 | Compiled for the device's CPU (Zen 2, Zen 3 for the Legion Go S) with a PGO profile recorded on that hardware | Ryzen 7 5800X3D profile | Steam Deck profile | generic x86-64 |
-| Frame generation held at 2x with evenly spaced frames | – | ✅ | up to 4x |
+| Frame generation held at 2x with evenly spaced frames | up to 4x, as Lichii | ✅ | up to 4x |
 | Save Data Transfer (a game's save as a zip, backed up before an import) | ✅ | ✅ | – |
 | The log written out on a crash or a GPU device loss | ✅ | ✅ | – |
 | Linux-only CI: AppImages for desktop and handheld, no other platforms | ✅ | ✅ | Windows, Linux, macOS, Android |
