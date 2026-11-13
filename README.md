@@ -54,27 +54,38 @@ Each build ships as a self-contained **AppImage** in two variants:
 
 **⬇️ Latest releases:**
 - **PC:** [LaküenPlay v1.2 – PC](../../releases/tag/v1.2) (`LakuenPlay-v1.2-PC-x86_64-pgo.AppImage` is recommended)
-- **Handheld:** [LaküenPlay v1.0.2 – Handheld](../../releases/tag/handheld-v1.0.2) (`LakuenPlay-v1.0.2-Handheld-x86_64-pgo.AppImage` is recommended; Steam Deck, Legion Go S and other Zen 2+ handhelds)
+- **Handheld:** [LaküenPlay v1.0.3 – Handheld](../../releases/tag/handheld-v1.0.3) (`LakuenPlay-v1.0.3-Handheld-x86_64-pgo.AppImage` is recommended; Steam Deck, Legion Go S and other Zen 2+ handhelds)
 
 ### What LaküenPlay adds
 
-Compared with [Lichii](https://github.com/zortos293/Lichii) itself:
+Compared with [Lichii](https://github.com/zortos293/Lichii) and the other Lichii-based builds, as of 2026-11-13
+([Eglantine](https://github.com/Djihads80/Eglantine) `nx2-experimental`, [Fritchii](https://github.com/Frizti/Fritchii) v5.8;
+Orchid's repository was emptied on 2026-11-13):
 
-| | LaküenPlay PC (v1.2) | LaküenPlay Handheld (v1.0.2) | Lichii |
-|---|:-:|:-:|:-:|
-| Memory guard for 16 GB shared RAM (caches give memory back below 2.5 / 1.5 GiB free) | – | ✅ | – |
-| Texture cache capped at 3–3.5 GiB on 16 GB machines, also on integrated GPUs | ✅ | ✅ | – |
-| Freed heap handed back to Linux after the boot builds and evictions | ✅ | ✅ | – |
-| Idle all-zero guest memory freed on Linux (Lichii: Windows only) | ✅ | ⚙️ off by default | – |
-| Shader cache file mapped instead of copied into RAM (Linux) | ✅ | ✅ | – |
-| Pipeline misses during play translate their stages in parallel | ✅ | ✅ | – |
-| Compiled for the device's CPU (Zen 2, Zen 3 for the Legion Go S) with a PGO profile recorded on that hardware | Ryzen 7 5800X3D profile | Steam Deck profile | generic x86-64 |
-| Frame generation held at 2x with evenly spaced frames | up to 4x, as Lichii | ✅ | up to 4x |
-| Save Data Transfer (a game's save as a zip, backed up before an import) | ✅ | ✅ | – |
-| The log written out on a crash or a GPU device loss | ✅ | ✅ | – |
-| Linux-only CI: AppImages for desktop and handheld, no other platforms | ✅ | ✅ | Windows, Linux, macOS, Android |
+| | LaküenPlay PC (v1.2) | LaküenPlay Handheld (v1.0.3) | Lichii | Eglantine | Fritchii |
+|---|:-:|:-:|:-:|:-:|:-:|
+| Memory guard for 16 GB shared RAM (caches give memory back below 2.5 / 1.5 GiB free) | – | ✅ | – | – | – |
+| Texture cache capped at 3–3.5 GiB on 16 GB machines, also on integrated GPUs | ✅ | ✅ | – | – | – |
+| Freed heap handed back to Linux (`malloc_trim`) after the boot builds and evictions | ✅ | ✅ | – | – | – |
+| Idle all-zero guest memory freed on Linux | ✅ | ⚙️ | Windows only | – | Windows only |
+| Shader cache file mapped instead of copied into RAM (Linux) | ✅ | ✅ | – | – | – |
+| Compiled for the device's CPU with a PGO profile recorded on that hardware | Ryzen 7 5800X3D | Steam Deck (Zen 2) | generic | generic | generic |
+| Frame generation | up to 4x | 2x, evenly spaced | up to 4x | up to 4x | up to 4x |
+| Save Data Transfer (a game's save as a zip, backed up before an import) | ✅ | ✅ | – | – | – |
+| The log written out on a fatal signal or a GPU device loss | ✅ | ✅ | crash dumps (opt-in) | – | – |
+| Linux AppImages for desktop and handhelds only | ✅ | ✅ | all platforms | all platforms | all platforms |
 
-⚙️ `EDEN_NX2_ZERO_TRIM=1` turns it on. Every change can be switched off with an environment variable.
+⚙️ Off by default since v1.0.2 (it froze a Steam Deck on the new base); `EDEN_NX2_ZERO_TRIM=1` turns it on. Every change
+can be switched off with an environment variable. The table compares the builds' code; it says nothing about which runs a
+given game faster on a given PC.
+
+### Known issues
+
+- **Handheld v1.0 and v1.0.1** could freeze a Steam Deck; v1.0.2 turned the suspected pass off, v1.0.3 adds Lichii's fix
+  for migrating an old shader cache without holding it three times in RAM. Whether the freeze is gone on the Deck is not
+  confirmed yet.
+- **Handheld:** tested mostly on a Legion Go S; the Steam Deck can still run short of RAM in large areas.
+- **PC v1.2** stays on Lichii build 130 (the handheld build moved to a current Lichii).
 
 Test builds are produced by [GitHub Actions](../../actions/workflows/release-binaries.yml), and every run is titled with what it contains. Downloading an artifact needs a GitHub login.
 
