@@ -694,6 +694,9 @@ jobs:
           set -euo pipefail
           version="${{ inputs.release_version }}"
           device="${APP_LABEL##*-}"   # PC or Handheld
+          # (handheld) The tag carries the device (handheld-v1.0: the PC's v1.0 is another release);
+          # file names and the title use the version alone.
+          shown="${version#handheld-}"
           device_lc=$(tr '[:upper:]' '[:lower:]' <<< "$device")
           mkdir out
           for artifact in artifacts/*/; do
@@ -702,10 +705,10 @@ jobs:
             [[ "$name" == *-pgo-* ]] && variant="-pgo"
             [[ "$name" == *instrumented* ]] && continue
             for file in "$artifact"*.AppImage; do
-              cp "$file" "out/LakuenPlay-${version}-${device}-x86_64${variant}.AppImage"
+              cp "$file" "out/LakuenPlay-${shown}-${device}-x86_64${variant}.AppImage"
             done
             for file in "$artifact"*.tar.gz; do
-              cp "$file" "out/LakuenPlay-${version}-${device}-x86_64${variant}.tar.gz"
+              cp "$file" "out/LakuenPlay-${shown}-${device}-x86_64${variant}.tar.gz"
             done
           done
           (cd out && sha256sum * > SHA256SUMS.txt)
@@ -713,11 +716,12 @@ jobs:
           gh api "repos/${GITHUB_REPOSITORY}/contents/.github/release-notes/${version}-${device_lc}.md?ref=${GITHUB_SHA}" \
             -H "Accept: application/vnd.github.raw" > notes.md
           test -s notes.md
+          # (handheld: not marked latest, which stays the PC release)
           gh release create "${version}" out/* \
             --repo "${GITHUB_REPOSITORY}" \
             --verify-tag \
-            --latest \
-            --title "LaküenPlay ${version} – ${device}" \
+            --latest=false \
+            --title "LaküenPlay ${shown} – ${device}" \
             --notes-file notes.md
 
       - name: Create release
