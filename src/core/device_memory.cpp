@@ -33,10 +33,12 @@ DeviceMemory::DeviceMemory()
 #if defined(_WIN32)
     zero_trim_thread = std::jthread{[this](std::stop_token stop) { TrimZeroPages(stop); }};
 #elif defined(__linux__)
-    // (LaküenPlay) On Linux too: the idle all-zero pages are punched out of the memfd
-    // (HostMemory::TrimZeroPages). EDEN_NX2_ZERO_TRIM=0 turns it off
+    // (LaküenPlay) Off by default on this base: with it, v1.0 froze a whole Steam Deck, which the
+    // same pass on the build-130 base did not (the new base hands guest memory to the GPU and hints
+    // it cold itself, #1581, #1528). EDEN_NX2_ZERO_TRIM=1 punches the idle all-zero pages out of
+    // the memfd again (HostMemory::TrimZeroPages)
     const char* zero_trim = std::getenv("EDEN_NX2_ZERO_TRIM");
-    if (zero_trim == nullptr || zero_trim[0] != '0') {
+    if (zero_trim != nullptr && zero_trim[0] == '1') {
         zero_trim_thread = std::jthread{[this](std::stop_token stop) { TrimZeroPages(stop); }};
     }
 #endif
