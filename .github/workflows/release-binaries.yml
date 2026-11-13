@@ -87,6 +87,13 @@ jobs:
           set -euo pipefail
           tag="${RELEASE_TAG}"
           if tag_sha=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/$tag" --jq '.object.sha' 2>/dev/null); then
+            if [ "$tag_sha" != "$GITHUB_SHA" ] && [ -n "${{ inputs.release_version }}" ] && \
+               ! gh release view "$tag" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+              # (this fork) A versioned tag a failed build left behind, with no release on it: it moves to this commit
+              gh api -X PATCH "repos/${GITHUB_REPOSITORY}/git/refs/tags/$tag" -f sha="$GITHUB_SHA" -F force=true >/dev/null
+              echo "Moved the unreleased tag $tag from $tag_sha to $GITHUB_SHA"
+              tag_sha="$GITHUB_SHA"
+            fi
             if [ "$tag_sha" != "$GITHUB_SHA" ]; then
               echo "Release tag $tag points to $tag_sha instead of $GITHUB_SHA"
               exit 1
