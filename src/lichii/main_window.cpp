@@ -9,9 +9,14 @@
 #endif
 
 #include <cstdlib>
+#include <algorithm>
+#include <fstream>
+#include <sstream>
+#include <vector>
 #include <QSysInfo>
 #include <boost/algorithm/string/split.hpp>
 #include "common/fs/path_util.h"
+#include "common/recommended_settings.h"
 #include "common/settings.h"
 #include "common/settings_enums.h"
 #include "common/shutdown_progress.h"
@@ -246,6 +251,138 @@ static inline void ApplyDarkToTopLevel(QWidget* w, bool on) {
         return;
     ApplyWindowsTitleBarDarkMode(reinterpret_cast<HWND>(w->winId()), on);
 }
+
+// (LaküenPlay) The master log: a short summary of each of the last five runs in
+// lakuen_master_log.txt beside the log (frame rate over the run, RAM and swap, the settings that
+// matter), newest first, one small file to send instead of the whole log.
+// EDEN_NX2_MASTER_LOG=0 keeps none.
+namespace LakuenMasterLog {
+struct Run {
+    std::vector<float> fps;
+    float frametime_max_ms = 0;
+    u64 available_min = ~u64{0};
+    u64 swap_used_max = 0;
+    u64 resident_max = 0;
+    int shader_builds_max = 0;
+    QDateTime started;
+    bool active = false;
+};
+Run run;
+
+bool Enabled() {
+    const char* value = std::getenv("EDEN_NX2_MASTER_LOG");
+    return !(value != nullptr && value[0] == '0');
+}
+
+u64 SwapUsed() {
+#ifdef __linux__
+    std::ifstream meminfo("/proc/meminfo");
+    std::string key;
+    u64 value = 0, total = 0, free = 0;
+    std::string unit;
+    while (meminfo >> key >> value) {
+        std::getline(meminfo, unit);
+        if (key == "SwapTotal:") total = value;
+        else if (key == "SwapFree:") free = value;
+    }
+    return total > free ? (total - free) << 10 : 0;
+#else
+    return 0;
+#endif
+}
+
+void Begin() {
+    run = Run{};
+    run.started = QDateTime::currentDateTime();
+    run.active = Enabled();
+}
+
+void Sample(double game_fps, double frametime_s, int shaders_building) {
+    if (!run.active) {
+        return;
+    }
+    if (game_fps > 0) {
+        run.fps.push_back(static_cast<float>(game_fps));
+    }
+    run.frametime_max_ms = (std::max)(run.frametime_max_ms, static_cast<float>(frametime_s * 1000.0));
+    run.shader_builds_max = (std::max)(run.shader_builds_max, shaders_building);
+    if (run.fps.size() % 4 == 0) {   // (the memory every ~2 s)
+        if (const u64 available = Common::GetMemAvailableCached()) {
+            run.available_min = (std::min)(run.available_min, available);
+        }
+        run.swap_used_max = (std::max)(run.swap_used_max, SwapUsed());
+        run.resident_max = (std::max)(run.resident_max, Common::GetProcessMemoryUsage().working_set);
+    }
+}
+
+void End(u64 program_id) {
+    if (!run.active) {
+        return;
+    }
+    run.active = false;
+    std::ostringstream out;
+    const auto mib = [](u64 bytes) { return bytes >> 20; };
+    out << "######## run ended " << QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm")).toStdString()
+        << " (started " << run.started.toString(QStringLiteral("HH:mm")).toStdString() << ")\n";
+    out << "build: " << Common::g_app_label << " " << Common::g_build_version << "\n";
+    const auto device = Settings::HandheldDeviceName(Settings::DetectHandheldDevice());
+    out << "device: " << (device.empty() ? std::string_view{"PC"} : device) << "\n";
+    out << "program: " << fmt::format("{:016X}", program_id) << "\n";
+    std::vector<float> sorted = run.fps;
+    std::sort(sorted.begin(), sorted.end());
+    if (!sorted.empty()) {
+        double sum = 0;
+        for (const float value : sorted) sum += value;
+        out << fmt::format("fps ({} samples of 0.5 s): min {:.1f} / 5% {:.1f} / avg {:.1f} / max {:.1f}\n", sorted.size(),
+                           sorted.front(), sorted[sorted.size() / 20], sum / sorted.size(), sorted.back());
+        size_t under30 = 0;
+        for (const float value : sorted) under30 += value < 29.5f;
+        out << fmt::format("time under 30 fps: {:.0f} %; longest frame {:.0f} ms; shaders building at once: up to {}\n",
+                           100.0 * under30 / sorted.size(), run.frametime_max_ms, run.shader_builds_max);
+        out << "fps over the run (every 30 s):";
+        for (size_t i = 0; i < run.fps.size(); i += 60) out << fmt::format(" {:.0f}", run.fps[i]);
+        out << "\n";
+    }
+    if (run.available_min != ~u64{0}) {
+        out << "memory: available min " << mib(run.available_min) << " MiB, swap used max " << mib(run.swap_used_max)
+            << " MiB, emulator resident max " << mib(run.resident_max) << " MiB\n";
+    }
+    out << "settings:";
+    for (const auto* setting : {static_cast<const Settings::BasicSetting*>(&Settings::values.use_docked_mode),
+                                static_cast<const Settings::BasicSetting*>(&Settings::values.resolution_setup),
+                                static_cast<const Settings::BasicSetting*>(&Settings::values.scaling_filter),
+                                static_cast<const Settings::BasicSetting*>(&Settings::values.anti_aliasing),
+                                static_cast<const Settings::BasicSetting*>(&Settings::values.gpu_accuracy),
+                                static_cast<const Settings::BasicSetting*>(&Settings::values.frame_rate_limit),
+                                static_cast<const Settings::BasicSetting*>(&Settings::values.gpu_clock),
+                                static_cast<const Settings::BasicSetting*>(&Settings::values.cpu_clock)}) {
+        out << " " << setting->GetLabel() << "=" << setting->ToString();
+    }
+    out << "\n";
+    for (const char* name : {"EDEN_NX2_ZERO_TRIM", "EDEN_NX2_LOW_MEMORY_MIB", "EDEN_NX2_CRITICAL_MEMORY_MIB"}) {
+        if (const char* value = std::getenv(name)) out << name << "=" << value << "\n";
+    }
+
+    const auto path = Common::FS::GetEdenPath(Common::FS::EdenPath::LogDir) / "lakuen_master_log.txt";
+    std::string old;
+    {
+        std::ifstream in(path, std::ios::binary);
+        std::stringstream buffer;
+        buffer << in.rdbuf();
+        old = buffer.str();
+    }
+    std::string text = out.str() + "\n";
+    size_t kept = 0, at = 0;
+    while (kept < 4 && (at = old.find("######## run ended", at)) != std::string::npos) {
+        const size_t next = old.find("######## run ended", at + 1);
+        text += old.substr(at, next == std::string::npos ? std::string::npos : next - at);
+        at = next == std::string::npos ? old.size() : next;
+        ++kept;
+    }
+    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+    file << text;
+}
+} // namespace LakuenMasterLog
 
 namespace {
 struct TitlebarFilter final : QObject {
@@ -2445,6 +2582,7 @@ void MainWindow::BootGame(const QString& filename, Service::AM::FrontendAppletPa
         game_list_placeholder->hide();
     }
     status_bar_update_timer.start(500);
+    LakuenMasterLog::Begin();   // (LaküenPlay: this run's summary for the master log)
     renderer_status_button->setDisabled(true);
     frame_gen_status_button->setDisabled(true);
     frame_gen_state = VideoCore::FrameGenState::Pending;
@@ -2640,6 +2778,7 @@ void MainWindow::OnEmulationStopped() {
     if (QtCommon::emu_thread && QtCommon::emu_thread->isRunning()) {
         return;
     }
+    LakuenMasterLog::End(QtCommon::system ? QtCommon::system->GetApplicationProcessProgramID() : 0);
     if (bug_report_dialog) {
         bug_report_dialog->StopCapture();
     }
@@ -5455,6 +5594,7 @@ void MainWindow::UpdateStatusBar() {
     auto results = QtCommon::system->GetAndResetPerfStats();
     auto& shader_notify = QtCommon::system->GPU().ShaderNotify();
     const int shaders_building = shader_notify.ShadersBuilding();
+    LakuenMasterLog::Sample(results.average_game_fps, results.frametime, shaders_building);
 
     // Before statsUpdated, so the performance overlay reads this update's generated frame rate.
     const auto frame_gen = QtCommon::system->GPU().Renderer().GetFrameGenStatus();
