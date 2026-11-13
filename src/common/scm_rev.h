@@ -23,6 +23,10 @@ extern const char g_title_bar_format_running[];
 extern const char g_shader_cache_version[];
 extern const char g_compiler_id[];
 
+// (LaküenPlay) The name in the window title, the log and the About dialog. It is based on Lichii
+// and Eden; data folders and settings stay those of Lichii.
+inline constexpr const char g_app_label[] = "LaküenPlay – Handheld";
+
 extern const bool g_is_dev_build;
 extern const bool g_is_nightly_build;
 
