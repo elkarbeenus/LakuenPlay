@@ -71,7 +71,7 @@ public:
 
     Common::HostMemory buffer;
 
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__linux__)
 private:
     void TrimZeroPages(std::stop_token stop);
 

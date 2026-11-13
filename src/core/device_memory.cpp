@@ -1,15 +1,19 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__linux__)
 #include <algorithm>
 #include <chrono>
 #include <condition_variable>
+#include <cstdlib>
 #include <mutex>
 #include <new>
 
 #include "common/logging.h"
 #include "common/memory_detect.h"
 #include "common/thread.h"
+#endif
+#if defined(__linux__) && defined(__GLIBC__)
+#include <malloc.h>
 #endif
 
 #include "core/device_memory.h"
@@ -26,16 +30,25 @@ constexpr size_t VirtualReserveSize = 1ULL << 39;
 DeviceMemory::DeviceMemory()
     : buffer{Kernel::Board::Nintendo::Nx::KSystemControl::Init::GetIntendedMemorySize(),
              VirtualReserveSize} {
-#ifdef _WIN32
+#if defined(_WIN32)
     zero_trim_thread = std::jthread{[this](std::stop_token stop) { TrimZeroPages(stop); }};
+#elif defined(__linux__)
+    // (LaküenPlay) On Linux too: the idle all-zero pages are punched out of the memfd
+    // (HostMemory::TrimZeroPages). EDEN_NX2_ZERO_TRIM=0 turns it off
+    const char* zero_trim = std::getenv("EDEN_NX2_ZERO_TRIM");
+    if (zero_trim == nullptr || zero_trim[0] != '0') {
+        zero_trim_thread = std::jthread{[this](std::stop_token stop) { TrimZeroPages(stop); }};
+    }
 #endif
 }
 
 DeviceMemory::~DeviceMemory() = default;
 
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__linux__)
 // Windows can't punch holes in the guest memory section, so pages holding only zeros (games clear
 // their heaps while booting: Ocarina leaves ~7 GB) stay resident until they leave the working set.
+// (LaküenPlay) Linux punches the idle ones out of the memfd and hands the emulator's freed heap
+// back to the system (malloc_trim) while passes still free memory or the host is short of RAM.
 // A pass comes every 5 s while they keep turning up, backing off to once every 5 minutes: after
 // boot most passes trim 1-2 MiB for about a second of work. It waits out bulk mapping (loads,
 // spawns), whose map calls stalled 10-14 ms while a pass ran.
@@ -47,14 +60,36 @@ void DeviceMemory::TrimZeroPages(std::stop_token stop) {
     std::mutex mutex;
     std::condition_variable_any wake;
     std::chrono::seconds interval = 5s;
+    // (LaküenPlay) An area change fills memory fast (the kernel zero-fills new pages as the game
+    // touches them): when 256 MiB more were filled since the last pass, or the host runs short of
+    // RAM, the next pass comes after 5 s instead of after the backed-off interval (up to 5
+    // minutes). EDEN_NX2_ZERO_TRIM_AREA=0: wait the interval as before.
+    static const bool area_wake = [] {
+        const char* value = std::getenv("EDEN_NX2_ZERO_TRIM_AREA");
+        return value == nullptr || value[0] != '0';
+    }();
+    constexpr u64 AreaFillBytes = u64{256} << 20;
+    u64 filled_at_pass = Common::HostMemory::ZeroFilledBytes();
     while (true) {
-        {
-            std::unique_lock lock{mutex};
-            wake.wait_for(lock, stop, interval, [] { return false; });
+        for (auto waited = std::chrono::seconds{0}; waited < interval; waited += 5s) {
+            {
+                std::unique_lock lock{mutex};
+                wake.wait_for(lock, stop, (std::min)(std::chrono::seconds{5}, interval - waited),
+                              [] { return false; });
+            }
+            if (stop.stop_requested()) {
+                return;
+            }
+            if (area_wake &&
+                (Common::HostMemory::ZeroFilledBytes() - filled_at_pass >= AreaFillBytes ||
+                 Common::IsHostLowOnMemory())) {
+                break;
+            }
         }
         if (stop.stop_requested()) {
             return;
         }
+        filled_at_pass = Common::HostMemory::ZeroFilledBytes();
         // Busy: over 32 MiB mapped, unmapped or protected in the last half second. At most 10
         // waits (5 s), then the pass runs anyway.
         for (int wait = 0; wait < 10; ++wait) {
@@ -87,6 +122,19 @@ void DeviceMemory::TrimZeroPages(std::stop_token stop) {
             continue;
         }
         const auto [resident, trimmed] = result;
+#if defined(__linux__) && defined(__GLIBC__)
+        // malloc_trim walks and locks every heap arena, so a thread that allocates meanwhile
+        // waits; a Steam Deck showed a ~300-390 ms frame every 45-70 s, the trim pass period. It
+        // runs only while the passes still free memory (boot, area changes) or the host is short
+        // of RAM. EDEN_NX2_MALLOC_TRIM=1 runs it on every pass.
+        static const bool always_malloc_trim = [] {
+            const char* value = std::getenv("EDEN_NX2_MALLOC_TRIM");
+            return value != nullptr && value[0] == '1';
+        }();
+        if (always_malloc_trim || trimmed >= Busy || Common::IsHostLowOnMemory()) {
+            malloc_trim(0);
+        }
+#endif
         const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                             std::chrono::steady_clock::now() - start)
                             .count();
