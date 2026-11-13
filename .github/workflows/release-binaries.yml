@@ -1,12 +1,18 @@
 name: release-binaries
+# (this fork) The run title says what the build contains: the note given at dispatch, else the branch.
+run-name: "${{ inputs.note || github.ref_name }}"
 
 on:
   workflow_dispatch:
     inputs:
+      note:
+        description: What this build contains (shown as the run title)
+        type: string
+        default: ""
       publish_release:
-        description: Publish the binaries as a GitHub release
+        description: "Publish the binaries as a GitHub release (only for agreed releases; test builds stay as run artifacts)"
         type: boolean
-        default: true
+        default: false
   push:
     branches:
       - nx2-experimental
@@ -34,6 +40,8 @@ permissions:
 # eglantine.profdata; bump it when a refreshed profile needs a newer LLVM.
 env:
   PGO_LLVM_VERSION: "23"
+  # (this fork) File and artifact name of the handheld build (no umlaut in file names).
+  APP_LABEL: LakuenPlay-Handheld
 
 # A running build is never cancelled: it finishes and publishes. A push meanwhile queues one build;
 # a later push replaces it, so the newest commit builds as soon as the running one is done.
@@ -91,19 +99,7 @@ jobs:
           - platform: linux-x86_64-pgo
             runner: ubuntu-24.04
             pgo: true
-          - platform: windows-x86_64
-            runner: windows-2022
-          - platform: windows-x86_64-pgo
-            runner: windows-2022
-            pgo: true
-            profile: lichii-windows.profdata
-          - platform: linux-aarch64
-            runner: ubuntu-24.04-arm
-          - platform: linux-aarch64-pgo
-            runner: ubuntu-24.04-arm
-            pgo: true
-          - platform: macos-arm64
-            runner: macos-15
+          # (this fork: Linux x86-64 only; upstream also builds Windows, Linux ARM64 and macOS)
 
     steps:
       - name: Check out source
@@ -188,8 +184,31 @@ jobs:
             sudo tee /etc/apt/sources.list.d/llvm.list > /dev/null
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            "clang-$PGO_LLVM_VERSION" "lld-$PGO_LLVM_VERSION"
+            "clang-$PGO_LLVM_VERSION" "lld-$PGO_LLVM_VERSION" "llvm-$PGO_LLVM_VERSION"
           "clang-$PGO_LLVM_VERSION" --version
+
+      # (this fork) Raw profiles recorded on a Steam Deck are kept in pgo/ as .profraw.xz or .profraw.zst; they are
+      # merged into oot-linux.profdata, which the Linux PGO build then uses in place of eglantine.profdata.
+      - name: Merge the handheld profile
+        if: startsWith(matrix.platform, 'linux') && matrix.pgo
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          raw=(pgo/*.profraw.zst pgo/*.profraw.xz)
+          if [ ${#raw[@]} -eq 0 ]; then
+            echo "No raw profiles in pgo/: eglantine.profdata"
+            exit 0
+          fi
+          mkdir -p "$RUNNER_TEMP/profraw"
+          for f in "${raw[@]}"; do
+            case "$f" in
+              *.zst) zstd -d -q -f "$f" -o "$RUNNER_TEMP/profraw/$(basename "${f%.zst}")" ;;
+              *.xz) xz -d -c "$f" > "$RUNNER_TEMP/profraw/$(basename "${f%.xz}")" ;;
+            esac
+          done
+          "llvm-profdata-$PGO_LLVM_VERSION" merge -o oot-linux.profdata "$RUNNER_TEMP"/profraw/*.profraw || {
+            echo "::warning::the handheld profile could not be merged: eglantine.profdata"; rm -f oot-linux.profdata; }
 
       # The profiles are in the source tree, where the Linux and Windows configure steps read them.
       - name: Check PGO profile
@@ -291,10 +310,15 @@ jobs:
             -DLICHII_BUILD_PLATFORM=${{ matrix.platform }}
             -DUSE_DISCORD_PRESENCE=OFF
             -DUSE_CCACHE=ON
+            # (this fork, handheld) Zen 2 code: the Steam Deck is Zen 2, the Legion Go S (Z2 Go) Zen 3+.
+            -DLICHII_BUILD_PRESET=zen2
           )
           if [ '${{ matrix.pgo }}' = 'true' ]; then
             # Same flags Eden's CI passes for its clang PGO build.
-            profile="-fprofile-use=$PWD/eglantine.profdata -Wno-backend-plugin \
+            profdata=eglantine.profdata
+            [ -s oot-linux.profdata ] && profdata=oot-linux.profdata   # (this fork: the handheld profile when merged)
+            echo "PGO profile: $profdata"
+            profile="-fprofile-use=$PWD/$profdata -Wno-backend-plugin \
               -Wno-profile-instr-unprofiled -Wno-profile-instr-out-of-date"
             flags+=(
               "-DCMAKE_C_COMPILER=clang-$PGO_LLVM_VERSION"
@@ -453,7 +477,7 @@ jobs:
           export EXTRA_PLATFORM_PLUGINS='libqwayland-egl.so;libqwayland-generic.so'
           # Embedded in the AppImage metadata; matches the release tag (build-N) plus the commit.
           export LDAI_VERSION="build-${GITHUB_RUN_NUMBER}-${GITHUB_SHA::7}"
-          export LDAI_OUTPUT="lichii-${GITHUB_SHA}-${{ matrix.platform }}.AppImage"
+          export LDAI_OUTPUT="${APP_LABEL}-build-${GITHUB_RUN_NUMBER}-${GITHUB_SHA::7}-${{ matrix.platform }}.AppImage"
           export OUTPUT="$LDAI_OUTPUT"
           export ARCH="$arch"
           mkdir -p AppDir/usr/bin AppDir/usr/share/licenses
@@ -591,10 +615,10 @@ jobs:
         if: startsWith(matrix.platform, 'linux')
         uses: actions/upload-artifact@v7
         with:
-          name: lichii-${{ matrix.platform }}-${{ github.sha }}
+          name: ${{ env.APP_LABEL }}-build-${{ github.run_number }}-${{ matrix.platform }}-${{ github.sha }}
           path: |
             lichii-${{ github.sha }}-${{ matrix.platform }}.tar.gz
-            lichii-${{ github.sha }}-${{ matrix.platform }}.AppImage
+            ${{ env.APP_LABEL }}-build-*-${{ matrix.platform }}.AppImage
           if-no-files-found: error
           compression-level: 0
           retention-days: 7
@@ -626,7 +650,7 @@ jobs:
       - name: Download binaries
         uses: actions/download-artifact@v7
         with:
-          pattern: lichii-*-${{ github.sha }}
+          pattern: '*-${{ github.sha }}'
           path: artifacts
 
       - name: Package release files
