@@ -54,7 +54,7 @@ Each build ships as a self-contained **AppImage** in two variants:
 
 **⬇️ Latest releases:**
 - **PC:** [LaküenPlay v1.2 – PC](../../releases/tag/v1.2) (`LakuenPlay-v1.2-PC-x86_64-pgo.AppImage` is recommended)
-- **Handheld:** [LaküenPlay v1.0.1 – Handheld](../../releases/tag/handheld-v1.0.1) (`LakuenPlay-v1.0.1-Handheld-x86_64-pgo.AppImage` is recommended; Steam Deck, Legion Go S and other Zen 2+ handhelds)
+- **Handheld:** [LaküenPlay v1.0.2 – Handheld](../../releases/tag/handheld-v1.0.2) (`LakuenPlay-v1.0.2-Handheld-x86_64-pgo.AppImage` is recommended; Steam Deck, Legion Go S and other Zen 2+ handhelds)
 
 Test builds are produced by [GitHub Actions](../../actions/workflows/release-binaries.yml), and every run is titled with what it contains. Downloading an artifact needs a GitHub login.
 
