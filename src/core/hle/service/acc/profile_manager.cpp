@@ -560,10 +560,10 @@ std::vector<std::string> ProfileManager::FindOrphanedProfiles()
             const auto is_empty = [&entry, &override]() -> bool {
                 try {
                     for (const auto& file : fs::recursive_directory_iterator(entry.path())) {
-                        // TODO: .yuzu_save_size is a weird file that gets created by certain games
+                        // TODO: the save size file (SaveDataFactory's GetSaveDataSizeFileName) gets created by certain games
                         // I have no idea what its purpose is, but TEMPORARY SOLUTION: just mark the profile as valid if
                         // this file exists (???) e.g. for SSBU
-                        // In short: if .yuzu_save_size is the ONLY file in a profile it's probably fine to keep
+                        // In short: if the save size file is the ONLY file in a profile it's probably fine to keep
                         if (file.path().filename().string() == FileSys::GetSaveDataSizeFileName())
                             override = true;
 

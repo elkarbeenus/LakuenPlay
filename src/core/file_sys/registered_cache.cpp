@@ -1042,7 +1042,7 @@ bool RegisteredCache::RemoveExistingEntry(u64 title_id) const {
                          deleted_html || deleted_legal);
     }
 
-    // If patch entries for any program exist in the yuzu_meta directory, remove them
+    // If patch entries for any program exist in the NAND's meta directory, remove them
     for (u8 i = 0; i < 0x10; i++) {
         const auto meta_dir = dir->CreateDirectoryRelative("yuzu_meta");
         const auto filename = GetCNMTName(TitleType::Update, title_id + i);

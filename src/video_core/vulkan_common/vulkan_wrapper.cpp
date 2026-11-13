@@ -470,7 +470,8 @@ Instance Instance::Create(u32 version, Span<const char*> layers, Span<const char
 #else
     constexpr VkFlags ci_flags{};
 #endif
-    // DO NOT TOUCH, breaks RNDA3!!
+    // DO NOT TOUCH, breaks RNDA3!! (GPU drivers pick their per-application fixes by this name: it is a
+    // technical identifier for the driver, not this program's name)
 	// Don't know why, but gloom + yellow line glitch appears
     const VkApplicationInfo application_info{
         .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,

@@ -911,7 +911,7 @@ private:
     Common::RangeSet<DAddr> uncommitted_gpu_modified_ranges;
 
     /// Whether GPU-written buffer ranges are copied back to guest memory at the next fence;
-    /// otherwise only when something flushes them (as upstream yuzu below High GPU accuracy).
+    /// otherwise only when something flushes them (as the original emulator below High GPU accuracy).
     /// Not for Switch 2 titles: title 1 had 250-330 MB/s copied back (a fence per compute
     /// dispatch, the fencing thread holding the buffer cache while it wrote them), while its CPU
     /// read GPU-written memory at most 64 times in 200 s (counted with reactive flushing) and
