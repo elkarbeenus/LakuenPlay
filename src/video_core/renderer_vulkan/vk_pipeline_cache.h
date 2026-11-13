@@ -297,6 +297,8 @@ private:
     bool trim_after_evictions{};
     /// Common::TrimHeap on the serialization thread (Linux with glibc).
     void QueueHeapTrim(const char* reason);
+    /// (LaküenPlay) Destroys these pipelines (EvictUnusedPipelines; the memory guard)
+    void EvictPipelineKeys(const std::vector<GraphicsPipelineCacheKey>& evict, const char* why);
     std::unordered_set<u64> used_and_evicted; ///< Key hashes of pipelines used this session, evicted since
     VideoCommon::EvictedPointerSlots evicted_pointer_slots;
     /// The SPIR-V and stage infos of evicted pipelines, which build them again when used again

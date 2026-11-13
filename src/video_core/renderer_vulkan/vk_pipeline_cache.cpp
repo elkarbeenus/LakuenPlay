@@ -2189,7 +2189,8 @@ void PipelineCache::TickFrame() {
         retired_compute_pipelines.pop_front();
     }
     constexpr u64 EvictCheckFrames = 600;
-    if (frame_count % EvictCheckFrames == 0) {
+    if (frame_count % EvictCheckFrames == 0 ||
+        (frame_count % 120 == 0 && Common::IsMemoryCritical())) {
         EvictUnusedPipelines();
     }
 }
@@ -2197,7 +2198,41 @@ void PipelineCache::TickFrame() {
 void PipelineCache::EvictUnusedPipelines() {
     // Building a pipeline again on MoltenVK means a Metal compile mid-game, far dearer than the
     // rebuild cost below, so none are evicted there.
-    if (device.IsMoltenVK() || frame_count <= EvictAfterFrames) {
+    if (device.IsMoltenVK()) {
+        return;
+    }
+    // (LaküenPlay) Critically short of memory (EDEN_NX2_CRITICAL_MEMORY_MIB, 1.5 GiB available),
+    // pipelines unused for ~3 minutes at 30 fps go past the kept limits, at most 200 a sweep (every
+    // 120 frames), keeping up to 1500 never-used prebuilt ones: each holds ~0.45 MB of driver
+    // memory, and with the boot precache a Steam Deck kept thousands while it ran out of memory
+    // entering an area. Destroying them sooner (2.5 GiB, one minute) rebuilt them all the time.
+    if (Common::IsMemoryCritical() && frame_count > 5400) {
+        constexpr u64 CriticalEvictAfterFrames = 5400;
+        constexpr size_t CriticalMaxEvictions = 200;
+        constexpr size_t CriticalUnusedPrebuilt = 1500;
+        const u64 critical_cutoff = frame_count - CriticalEvictAfterFrames;
+        std::vector<GraphicsPipelineCacheKey> victims;
+        size_t kept_prebuilt = 0;
+        for (const auto& [key, pipeline] : graphics_cache) {
+            if (victims.size() >= CriticalMaxEvictions) {
+                break;
+            }
+            if (pipeline == nullptr || pipeline.get() == current_pipeline || !pipeline->IsBuilt() ||
+                pipeline->LastUse() >= critical_cutoff) {
+                continue;
+            }
+            if (!pipeline->WasUsed() && kept_prebuilt < CriticalUnusedPrebuilt) {
+                ++kept_prebuilt;
+                continue;
+            }
+            victims.push_back(key);
+        }
+        if (!victims.empty()) {
+            EvictPipelineKeys(victims, "memory critical");
+            return;
+        }
+    }
+    if (frame_count <= EvictAfterFrames) {
         return;
     }
     // An evicted pipeline used again is translated again on the GPU thread (~8.5 ms) and built
@@ -2248,6 +2283,11 @@ void PipelineCache::EvictUnusedPipelines() {
     if (evict.empty()) {
         return;
     }
+    EvictPipelineKeys(evict, "unused");
+}
+
+void PipelineCache::EvictPipelineKeys(const std::vector<GraphicsPipelineCacheKey>& evict,
+                                      [[maybe_unused]] const char* why) {
     const u64 tick = scheduler.CurrentTick();
     for (const GraphicsPipelineCacheKey& key : evict) {
         const auto it = graphics_cache.find(key);

@@ -82,4 +82,18 @@ struct HeapTrimResult {
 /// for that slice: call it off the GPU thread. Does nothing elsewhere.
 HeapTrimResult TrimHeap(std::string_view reason);
 
+/// (LaküenPlay) Bytes the system can still hand out without swapping (Linux MemAvailable), read
+/// again at most every 500 ms. 0 where the host doesn't say.
+[[nodiscard]] u64 GetMemAvailableCached();
+
+/// (LaküenPlay) Whether the host is short of memory: MemAvailable below 2.5 GiB
+/// (EDEN_NX2_LOW_MEMORY_MIB=<MiB>, 0 never). The caches give memory back while it holds: a Steam
+/// Deck (14.5 GiB for the system) ran out entering an area and the kernel ended the emulator.
+[[nodiscard]] bool IsMemoryLow();
+
+/// (LaküenPlay) MemAvailable below 1.5 GiB (EDEN_NX2_CRITICAL_MEMORY_MIB=<MiB>, 0 never): only then
+/// are built pipelines destroyed beyond the kept limit. Below IsMemoryLow the textures and the
+/// heap give memory back first; destroying pipelines needed again costs more than their ~0.45 MB.
+[[nodiscard]] bool IsMemoryCritical();
+
 } // namespace Common
