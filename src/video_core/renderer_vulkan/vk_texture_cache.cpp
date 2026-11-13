@@ -333,14 +333,11 @@ constexpr VkBorderColor ConvertBorderColor(const std::array<float, 4>& color) {
         id != VK_DRIVER_ID_MESA_RADV) {
         return false;
     }
-    // (handheld) A Steam Deck's 14.5 GiB: RGBA8 takes four times BC3's memory, and the seams at
-    // distant terrain are hard to see on its screen. EDEN_NX2_UNEVEN_ASTC_RGBA8=1: RGBA8 there too.
-    static const bool low_ram = [] {
-        const char* value = std::getenv("EDEN_NX2_UNEVEN_ASTC_RGBA8");
-        return !(value != nullptr && value[0] == '1') &&
-               Common::GetMemInfo().TotalPhysicalMemory <= (u64{15} << 30);
-    }();
-    if (low_ram) {
+    // RGBA8 is 4-16x the BC size: Ocarina of Time's uneven ASTC 8x8 images took ~3.4 GB instead
+    // of ~0.6 GB at area loads on a Steam Deck, where VRAM and system RAM are the same memory and
+    // the load peaks got the emulator killed. Integrated GPUs and cards under 6 GiB keep BC.
+    using namespace Common::Literals;
+    if (device.IsIntegrated() || device.GetDeviceLocalHeapSize() < 6_GiB) {
         return false;
     }
     return FirstUnevenBlockMip(info) != 0 && !EvenBcShape(info) && !IsHugeAstcArray(device, info);
