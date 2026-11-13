@@ -13,6 +13,10 @@ on:
         description: "Publish the binaries as a GitHub release (only for agreed releases; test builds stay as run artifacts)"
         type: boolean
         default: false
+      release_version:
+        description: "Versioned release (e.g. v1.0): tag and title use it, notes come from .github/release-notes/<version>-<device>.md. Empty = automatic build-N pre-release"
+        type: string
+        default: ""
   push:
     branches:
       - nx2-experimental
@@ -42,6 +46,7 @@ env:
   PGO_LLVM_VERSION: "23"
   # (this fork) File and artifact name of the handheld build (no umlaut in file names).
   APP_LABEL: LakuenPlay-Handheld
+  RELEASE_TAG: ${{ inputs.release_version || format('build-{0}', github.run_number) }}
 
 # A running build is never cancelled: it finishes and publishes. A push meanwhile queues one build;
 # a later push replaces it, so the newest commit builds as soon as the running one is done.
@@ -63,7 +68,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          tag="build-${GITHUB_RUN_NUMBER}"
+          tag="${RELEASE_TAG}"
           if tag_sha=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/$tag" --jq '.object.sha' 2>/dev/null); then
             if [ "$tag_sha" != "$GITHUB_SHA" ]; then
               echo "Release tag $tag points to $tag_sha instead of $GITHUB_SHA"
@@ -678,7 +683,45 @@ jobs:
           done
           ls -la dist
 
+      # (this fork) A versioned release: stable asset names without the commit, notes from the
+      # repository, published as the latest release instead of a pre-release.
+      - name: Create versioned release
+        if: inputs.release_version != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="${{ inputs.release_version }}"
+          device="${APP_LABEL##*-}"   # PC or Handheld
+          device_lc=$(tr '[:upper:]' '[:lower:]' <<< "$device")
+          mkdir out
+          for artifact in artifacts/*/; do
+            name=$(basename "$artifact")
+            variant=""
+            [[ "$name" == *-pgo-* ]] && variant="-pgo"
+            [[ "$name" == *instrumented* ]] && continue
+            for file in "$artifact"*.AppImage; do
+              cp "$file" "out/LakuenPlay-${version}-${device}-x86_64${variant}.AppImage"
+            done
+            for file in "$artifact"*.tar.gz; do
+              cp "$file" "out/LakuenPlay-${version}-${device}-x86_64${variant}.tar.gz"
+            done
+          done
+          (cd out && sha256sum * > SHA256SUMS.txt)
+          ls -la out
+          gh api "repos/${GITHUB_REPOSITORY}/contents/.github/release-notes/${version}-${device_lc}.md?ref=${GITHUB_SHA}" \
+            -H "Accept: application/vnd.github.raw" > notes.md
+          test -s notes.md
+          gh release create "${version}" out/* \
+            --repo "${GITHUB_REPOSITORY}" \
+            --verify-tag \
+            --latest \
+            --title "LaküenPlay ${version} – ${device}" \
+            --notes-file notes.md
+
       - name: Create release
+        if: inputs.release_version == ''
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -758,6 +801,7 @@ jobs:
       # compares release tags against it. A release whose tag or title names another run would be
       # skipped or offered wrongly, so fail the run instead of leaving it published.
       - name: Verify the release tag matches the run number
+        if: inputs.release_version == ''
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
