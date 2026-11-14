@@ -228,6 +228,7 @@ static FileSys::VirtualFile VfsDirectoryCreateFileWrapper(const FileSys::Virtual
 // matter), newest first, one small file to send instead of the whole log.
 // EDEN_NX2_MASTER_LOG=0 keeps none.
 namespace LakuenMasterLog {
+namespace {   // (only this file's: -Werror=missing-declarations)
 struct Run {
     std::vector<float> fps;
     float frametime_max_ms = 0;
@@ -353,6 +354,7 @@ void End(u64 program_id) {
     std::ofstream file(path, std::ios::binary | std::ios::trunc);
     file << text;
 }
+} // namespace
 } // namespace LakuenMasterLog
 
 #ifdef _WIN32
