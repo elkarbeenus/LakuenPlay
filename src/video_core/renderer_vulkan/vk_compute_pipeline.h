@@ -87,7 +87,8 @@ public:
         return shader_hash;
     }
 
-    /// The build finished or failed, so KeptSpirv() is no longer written.
+    /// Whether the driver build has finished (or failed: then IsBound is false), so KeptSpirv() is
+    /// no longer written
     [[nodiscard]] bool IsBuilt() const noexcept {
         return is_built.load(std::memory_order_acquire);
     }

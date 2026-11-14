@@ -45,6 +45,7 @@
 #include "video_core/engines/kepler_compute.h"
 #include "video_core/engines/maxwell_3d.h"
 #include "video_core/host1x/gpu_device_memory_manager.h"
+#include "video_core/ocarina_camera.h"
 #include "video_core/renderer_vulkan/blit_image.h"
 #include "video_core/renderer_vulkan/fixed_pipeline_state.h"
 #include "video_core/renderer_vulkan/framebuffer_clear_layers.h"
@@ -1011,11 +1012,6 @@ void RasterizerVulkan::PrepareDraw(bool is_indexed, Func&& draw_func, bool is_in
         Profile::Scope scope{Profile::Zone::PipelineLookup};
         return pipeline_cache.CurrentGraphicsPipeline();
     }()};
-    const bool verify_views = verify_pipeline != nullptr && verify_pipeline == pipeline;
-    if (verify_pipeline != nullptr) {
-        ++fast_draw_stats.verified;
-        fast_draw_stats.pipeline_mismatches += verify_pipeline != pipeline ? 1 : 0;
-    }
     if (!pipeline) {
         report_failure("no pipeline");
         TraceRenderState(is_indexed, "no-pipeline", nullptr);
@@ -1228,6 +1224,12 @@ void RasterizerVulkan::PrepareDraw(bool is_indexed, Func&& draw_func, bool is_in
     }
     const bool delta_holds =
         delta_pipeline != nullptr && DeltaStillHolds(draw_serial, draw_map_serial);
+    const bool verify_views =
+        delta_holds && verify_pipeline != nullptr && verify_pipeline == pipeline;
+    if (delta_holds && verify_pipeline != nullptr) {
+        ++fast_draw_stats.verified;
+        fast_draw_stats.pipeline_mismatches += verify_pipeline != pipeline ? 1 : 0;
+    }
     const DrawPath path = delta_holds && !verify_pipeline ? DrawPath::Delta : DrawPath::Full;
     // EDEN_NX2_FAST_DRAW_VERIFY compares only draws that would have taken the delta path.
     const bool verify_kept = verify_views && delta_holds;
@@ -3251,59 +3253,34 @@ void RasterizerVulkan::TrackOcarinaCamera() {
         return;
     }
 
-    buffer_cache.ForEachBoundBuffer(false, [&](u32 stage, bool storage, u32 index, bool,
-                                                const auto& binding, u32 bound_size,
-                                                const auto*, u32) {
-        std::array<f32, 0x230 / sizeof(f32)> camera;
-        if (stage != 0 || storage || index != 3 || bound_size < sizeof(camera) ||
-            buffer_cache.IsRegionGpuModified(binding.device_addr, sizeof(camera))) {
-            return;
-        }
-        device_memory.ReadBlockUnsafe(binding.device_addr, camera.data(), sizeof(camera));
-        constexpr size_t extent_offset = 0x120 / sizeof(f32);
-        constexpr size_t projection_wz = 0xa8 / sizeof(f32);
-        const f32 scene_width = camera[extent_offset];
-        const f32 scene_height = camera[extent_offset + 1];
-        if (camera[projection_wz] != -1.0f || camera[projection_wz + 1] != 0.0f ||
-            !(scene_width >= 640.0f) || !(scene_height >= 360.0f) ||
-            scene_width > static_cast<f32>(color.size.width) ||
-            scene_height > static_cast<f32>(color.size.height)) {
-            return;
-        }
-        // The camera's extent is the scene's. The images are that size, or up to 15 pixels
-        // larger at the DLSS Balanced render scale, which draws 2276x1280 into 2288x1280
-        // (QuincyForbes' f7d0938b5b); only DLSS takes those.
-        const VkExtent2D scene{static_cast<u32>(scene_width), static_cast<u32>(scene_height)};
-        const bool padded = scene.width != color.size.width || scene.height != color.size.height;
-        if (static_cast<f32>(scene.width) != scene_width ||
-            static_cast<f32>(scene.height) != scene_height ||
-            color.size.width - scene.width >= 16 || color.size.height - scene.height >= 16 ||
-            (padded && oot_backend != VideoCommon::OcarinaUpscaleBackend::Dlss)) {
-            return;
-        }
-        const std::span values{camera};
-        oot_camera_sample_frame = render_trace_frame;
-        oot_motion.camera_channel = gpu_memory;
-        oot_motion.extent = scene;
-        oot_motion.image_extent = {color.size.width, color.size.height};
-        std::copy_n(values.begin() + 0x30 / sizeof(f32), 16, oot_motion.current.begin());
-        std::copy_n(values.begin() + 0x180 / sizeof(f32), 16, oot_motion.previous.begin());
-    });
-}
-
-namespace {
-f32 Halton(u32 index, u32 base) {
-    f32 fraction = 1.0f;
-    f32 result = 0.0f;
-    while (index > 0) {
-        fraction /= static_cast<f32>(base);
-        result += fraction * static_cast<f32>(index % base);
-        index /= base;
+    // The shader-visible view omits unused slots and truncates ranges to shader usage.
+    // Camera tracking needs the guest binding, even when this draw reads fewer camera fields.
+    const auto& binding = maxwell3d->state.shader_stages[0].const_buffers[3];
+    if (!binding.enabled || binding.address == 0 || binding.size < VideoCommon::OcarinaCameraBytes ||
+        !gpu_memory->IsFullyMappedRange(binding.address, VideoCommon::OcarinaCameraBytes) ||
+        !gpu_memory->IsContinuousRange(binding.address, VideoCommon::OcarinaCameraBytes)) {
+        return;
     }
-    return result;
+    const auto device_address = gpu_memory->GpuToCpuAddress(binding.address);
+    if (!device_address ||
+        buffer_cache.IsRegionGpuModified(*device_address, VideoCommon::OcarinaCameraBytes)) {
+        return;
+    }
+    VideoCommon::OcarinaCameraBuffer values;
+    device_memory.ReadBlockUnsafe(*device_address, values.data(), sizeof(values));
+    const auto camera = VideoCommon::DecodeOcarinaCamera(
+        values, color.size.width, color.size.height,
+        oot_backend == VideoCommon::OcarinaUpscaleBackend::Dlss);
+    if (camera.issue != VideoCommon::OcarinaCameraIssue::None) {
+        return;
+    }
+    oot_camera_sample_frame = render_trace_frame;
+    oot_motion.camera_channel = gpu_memory;
+    oot_motion.extent = {camera.width, camera.height};
+    oot_motion.image_extent = {color.size.width, color.size.height};
+    oot_motion.current = camera.current;
+    oot_motion.previous = camera.previous;
 }
-
-} // Anonymous namespace
 
 void RasterizerVulkan::UpdateOcarinaJitter() {
     std::array<f32, 2> want{};
@@ -3320,9 +3297,11 @@ void RasterizerVulkan::UpdateOcarinaJitter() {
             const auto& depth = texture_cache.GetImageView(targets.depth_buffer_id);
             if (depth.size.width == oot_motion.extent.width &&
                 depth.size.height == oot_motion.extent.height && !depth.IsRescaled()) {
-                // Halton (2, 3) with AMD's phase count for the last FSR frame's scale.
+                // AMD's phase count for the last FSR frame's scale.
                 const u32 index = static_cast<u32>(render_trace_frame % oot_jitter_phases) + 1;
-                want = {Halton(index, 2) - 0.5f, Halton(index, 3) - 0.5f};
+                const auto driver = device.GetDriverID();
+                want = VideoCommon::OcarinaJitter(index, driver == VK_DRIVER_ID_AMD_PROPRIETARY ||
+                                                             driver == VK_DRIVER_ID_AMD_OPEN_SOURCE);
                 oot_jitter_frame = render_trace_frame;
                 oot_jitter_offset = want;
             }
@@ -3789,9 +3768,10 @@ bool RasterizerVulkan::SupportsGameDlssNetwork() const {
 }
 
 std::optional<VideoCore::GameDlssProbe> RasterizerVulkan::ProbeGameDlssOutput(
-    const Tegra::Engines::Fermi2D::Surface& src, const Tegra::Engines::Fermi2D::Surface& dst) {
+    const Tegra::Engines::Fermi2D::Surface& src, const Tegra::Engines::Fermi2D::Surface& dst,
+    std::optional<std::array<u32, 2>> src_region) {
     std::scoped_lock lock{texture_cache.mutex};
-    return texture_cache.ProbeGameDlssOutput(dst, src);
+    return texture_cache.ProbeGameDlssOutput(dst, src, src_region);
 }
 
 bool RasterizerVulkan::AccelerateTemporalUpscale(
@@ -4013,7 +3993,13 @@ AccelerateDMA::AccelerateDMA(BufferCache& buffer_cache_, TextureCache& texture_c
 
 bool AccelerateDMA::BufferClear(GPUVAddr src_address, u64 amount, u32 value) {
     std::scoped_lock lock{buffer_cache.mutex};
-    return buffer_cache.DMAClear(src_address, amount, value);
+    buffer_cache.Nx2CollectListCopies(true);
+    const bool cleared = buffer_cache.DMAClear(src_address, amount, value);
+    if (buffer_cache.Nx2CopyListPages(scheduler.CurrentTick())) {
+        scheduler.Flush();
+    }
+    buffer_cache.Nx2CollectListCopies(false);
+    return cleared;
 }
 
 bool AccelerateDMA::BufferCopy(GPUVAddr src_address, GPUVAddr dest_address, u64 amount) {
@@ -4042,6 +4028,10 @@ bool AccelerateDMA::DmaBufferImageCopy(const Tegra::DMA::ImageCopy& copy_info,
                                          : VideoCommon::ObtainBufferOperation::MarkAsWritten;
     const auto [buffer, offset] =
         buffer_cache.ObtainBuffer(buffer_operand.address, buffer_size, sync_info, post_op);
+    // Downloads to unmapped memory must not write the shared null buffer.
+    if (!IS_IMAGE_UPLOAD && buffer->IsNull()) {
+        return false;
+    }
 
     const auto [image, copy] = texture_cache.DmaBufferImageCopy(
         copy_info, buffer_operand, image_operand, image_id, IS_IMAGE_UPLOAD);
