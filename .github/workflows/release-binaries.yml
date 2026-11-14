@@ -31,6 +31,10 @@ on:
         description: "Versioned release (e.g. v1.0): tag and title use it, notes come from .github/release-notes/<version>-<device>.md. Empty = automatic build-N pre-release"
         type: string
         default: ""
+      test_build:
+        description: "(this fork) A versioned release marked as a test build: \"(Test build)\" in its title, a pre-release, replaced later"
+        type: boolean
+        default: false
   push:
     branches:
       - nx2-experimental
@@ -754,12 +758,19 @@ jobs:
           gh api "repos/${GITHUB_REPOSITORY}/contents/.github/release-notes/${version}-${device_lc}.md?ref=${GITHUB_SHA}" \
             -H "Accept: application/vnd.github.raw" > notes.md
           test -s notes.md
-          # (handheld: not marked latest, which stays the PC release)
+          # (handheld: not marked latest, which stays the PC release. A test build: said in the title, a pre-release)
+          title="LaküenPlay ${shown} – ${device}"
+          extra=()
+          if [ "${{ inputs.test_build }}" = "true" ]; then
+            title="${title} (Test build)"
+            extra=(--prerelease)
+          fi
           gh release create "${version}" out/* \
             --repo "${GITHUB_REPOSITORY}" \
             --verify-tag \
             --latest=false \
-            --title "LaküenPlay ${shown} – ${device}" \
+            "${extra[@]}" \
+            --title "${title}" \
             --notes-file notes.md
 
       - name: Create release
