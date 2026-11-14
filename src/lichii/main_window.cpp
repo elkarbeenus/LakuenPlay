@@ -223,35 +223,6 @@ static FileSys::VirtualFile VfsDirectoryCreateFileWrapper(const FileSys::Virtual
 
 #include "qt_common/gamemode.h"
 
-#ifdef _WIN32
-#include "common/windows/timer_resolution.h"
-#include "core/core_timing.h"
-
-#include <QPlatformSurfaceEvent>
-#include <QSettings>
-#include <dwmapi.h>
-#include <windows.h>
-#ifdef _MSC_VER
-#pragma comment(lib, "Dwmapi.lib")
-#endif
-
-static inline void ApplyWindowsTitleBarDarkMode(HWND hwnd, bool enabled) {
-    if (!hwnd)
-        return;
-    BOOL val = enabled ? TRUE : FALSE;
-    // 20 = Win11/21H2+
-    if (SUCCEEDED(DwmSetWindowAttribute(hwnd, 20, &val, sizeof(val))))
-        return;
-    // 19 = pre-21H2
-    DwmSetWindowAttribute(hwnd, 19, &val, sizeof(val));
-}
-
-static inline void ApplyDarkToTopLevel(QWidget* w, bool on) {
-    if (!w || !w->isWindow())
-        return;
-    ApplyWindowsTitleBarDarkMode(reinterpret_cast<HWND>(w->winId()), on);
-}
-
 // (LaküenPlay) The master log: a short summary of each of the last five runs in
 // lakuen_master_log.txt beside the log (frame rate over the run, RAM and swap, the settings that
 // matter), newest first, one small file to send instead of the whole log.
@@ -383,6 +354,35 @@ void End(u64 program_id) {
     file << text;
 }
 } // namespace LakuenMasterLog
+
+#ifdef _WIN32
+#include "common/windows/timer_resolution.h"
+#include "core/core_timing.h"
+
+#include <QPlatformSurfaceEvent>
+#include <QSettings>
+#include <dwmapi.h>
+#include <windows.h>
+#ifdef _MSC_VER
+#pragma comment(lib, "Dwmapi.lib")
+#endif
+
+static inline void ApplyWindowsTitleBarDarkMode(HWND hwnd, bool enabled) {
+    if (!hwnd)
+        return;
+    BOOL val = enabled ? TRUE : FALSE;
+    // 20 = Win11/21H2+
+    if (SUCCEEDED(DwmSetWindowAttribute(hwnd, 20, &val, sizeof(val))))
+        return;
+    // 19 = pre-21H2
+    DwmSetWindowAttribute(hwnd, 19, &val, sizeof(val));
+}
+
+static inline void ApplyDarkToTopLevel(QWidget* w, bool on) {
+    if (!w || !w->isWindow())
+        return;
+    ApplyWindowsTitleBarDarkMode(reinterpret_cast<HWND>(w->winId()), on);
+}
 
 namespace {
 struct TitlebarFilter final : QObject {
