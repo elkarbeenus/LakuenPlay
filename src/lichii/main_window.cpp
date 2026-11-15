@@ -606,11 +606,10 @@ MainWindow::MainWindow(bool has_broken_vulkan)
     show();
 
 #ifdef ENABLE_UPDATE_CHECKER
+    connect(&update_watcher, &QFutureWatcher<UpdateChecker::CheckResult>::finished, this,
+            &MainWindow::OnEmulatorUpdateAvailable);
     if (UISettings::values.check_for_updates) {
-        update_future = QtConcurrent::run([]() { return UpdateChecker::Check(); });
-        update_watcher.connect(&update_watcher, &QFutureWatcher<QString>::finished, this,
-                               &MainWindow::OnEmulatorUpdateAvailable);
-        update_watcher.setFuture(update_future);
+        StartUpdateCheck(false);
     }
 #endif
 
@@ -1946,6 +1945,8 @@ void MainWindow::ConnectMenuEvents() {
     connect_menu(ui->action_Data_Manager, &MainWindow::OnDataDialog);
 
 #if defined(ENABLE_UPDATE_CHECKER) && (defined(__linux__) || defined(_WIN32))
+    auto* check_update_action = ui->menu_Help->addAction(tr("Check for Updates..."));
+    connect(check_update_action, &QAction::triggered, this, [this] { StartUpdateCheck(true); });
     auto* restore_action = ui->menu_Help->addAction(tr("Restore Previous Version..."));
     restore_action->setVisible(false);
 #ifdef __linux__
@@ -5523,8 +5524,36 @@ void MainWindow::KeepNextendoSessionAlive() {
 }
 
 #ifdef ENABLE_UPDATE_CHECKER
+void MainWindow::StartUpdateCheck(bool manual) {
+    if (update_watcher.isRunning()) {
+        manual_update_check = manual_update_check || manual;
+        return;
+    }
+    manual_update_check = manual;
+    update_future = QtConcurrent::run([]() { return UpdateChecker::Check(); });
+    update_watcher.setFuture(update_future);
+}
+
 void MainWindow::OnEmulatorUpdateAvailable() {
     const auto result = update_future.result();
+    const bool manual = std::exchange(manual_update_check, false);
+    if (manual && result.failure != UpdateChecker::Failure::None) {
+        QtCommon::Frontend::Warning(
+            tr("Check for Updates"),
+            result.failure == UpdateChecker::Failure::RateLimited
+                ? tr("GitHub's rate limit is reached. Please try again later.")
+            : result.failure == UpdateChecker::Failure::Http
+                ? tr("Could not check for updates: GitHub answered with HTTP %1.")
+                      .arg(result.status)
+                : tr("Could not reach GitHub. Please check the internet connection."));
+        return;
+    }
+    if (manual && !result.update) {
+        QtCommon::Frontend::Information(
+            tr("Check for Updates"),
+            tr("LaküenPlay is up to date (%1).").arg(QString::fromUtf8(Common::g_build_version)));
+        return;
+    }
     if (result.failure == UpdateChecker::Failure::RateLimited) {
         statusBar()->showMessage(
             tr("Could not check for updates: GitHub rate limit reached. LaküenPlay will try again at "
@@ -5544,8 +5573,8 @@ void MainWindow::OnEmulatorUpdateAvailable() {
 
     const auto& release = *result.update;
     const auto now = static_cast<unsigned long long>(QDateTime::currentSecsSinceEpoch());
-    if (UISettings::values.skipped_update_tag.GetValue() == release.tag ||
-        UISettings::values.update_remind_at.GetValue() > now) {
+    if (!manual && (UISettings::values.skipped_update_tag.GetValue() == release.tag ||
+                    UISettings::values.update_remind_at.GetValue() > now)) {
         return;
     }
 

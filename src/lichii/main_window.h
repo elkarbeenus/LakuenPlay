@@ -474,6 +474,7 @@ private slots:
 
 #ifdef ENABLE_UPDATE_CHECKER
     void OnEmulatorUpdateAvailable();
+    void StartUpdateCheck(bool manual);
 #endif
     void KeepNextendoSessionAlive();
 
@@ -537,6 +538,7 @@ private:
 #ifdef ENABLE_UPDATE_CHECKER
     QFuture<UpdateChecker::CheckResult> update_future;
     QFutureWatcher<UpdateChecker::CheckResult> update_watcher;
+    bool manual_update_check = false;
 #endif
 
     MultiplayerState* multiplayer_state = nullptr;
