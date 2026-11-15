@@ -18,6 +18,8 @@ extern const char g_build_version[];
 extern const char g_build_id[];
 extern const char g_build_release_tag[];
 extern const char g_build_release_platform[];
+// (LaküenPlay) PC, Handheld or LegionGoS: the device in the release assets' names
+extern const char g_lakuen_asset_device[];
 extern const char g_title_bar_format_idle[];
 extern const char g_title_bar_format_running[];
 extern const char g_shader_cache_version[];

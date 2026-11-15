@@ -5527,7 +5527,7 @@ void MainWindow::OnEmulatorUpdateAvailable() {
     const auto result = update_future.result();
     if (result.failure == UpdateChecker::Failure::RateLimited) {
         statusBar()->showMessage(
-            tr("Could not check for updates: GitHub rate limit reached. Lichii will try again at "
+            tr("Could not check for updates: GitHub rate limit reached. LaküenPlay will try again at "
                "the next start."),
             15000);
         return;

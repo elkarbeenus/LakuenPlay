@@ -345,8 +345,11 @@ jobs:
             -DVulkanHeaders_FORCE_BUNDLED=ON
             -DVulkanUtilityLibraries_FORCE_BUNDLED=ON
             -DENABLE_UPDATE_CHECKER=ON
-            -DLICHII_BUILD_TAG=build-${{ github.run_number }}
+            -DLICHII_BUILD_TAG=${{ inputs.release_version || format('build-{0}', github.run_number) }}
             -DLICHII_BUILD_PLATFORM=${{ matrix.platform }}
+            # (this fork) the release's tag above and its assets' device: the update checker looks for
+            # LakuenPlay-<version>-<device>-x86_64[-pgo].AppImage in this repository's releases of the same track
+            -DLAKUEN_ASSET_DEVICE=${{ inputs.device == 'legion_go_s' && 'LegionGoS' || 'Handheld' }}
             -DUSE_DISCORD_PRESENCE=OFF
             -DUSE_CCACHE=ON
             # (this fork, handheld) Zen 2 code: the Steam Deck is Zen 2, the Legion Go S (Z2 Go) Zen 3+.
@@ -402,7 +405,7 @@ jobs:
             -DENABLE_QT_TRANSLATION=ON \
             -DLICHII_USE_BUNDLED_SDL3=ON \
             -DENABLE_UPDATE_CHECKER=ON \
-            -DLICHII_BUILD_TAG=build-${{ github.run_number }} \
+            -DLICHII_BUILD_TAG=${{ inputs.release_version || format('build-{0}', github.run_number) }} \
             -DLICHII_BUILD_PLATFORM=${{ matrix.platform }} \
             -DUSE_DISCORD_PRESENCE=OFF \
             -DCMAKE_C_COMPILER_LAUNCHER=sccache \
@@ -433,7 +436,7 @@ jobs:
             -DVulkanHeaders_FORCE_BUNDLED=ON \
             -DVulkanUtilityLibraries_FORCE_BUNDLED=ON \
             -DENABLE_UPDATE_CHECKER=ON \
-            -DLICHII_BUILD_TAG=build-${{ github.run_number }} \
+            -DLICHII_BUILD_TAG=${{ inputs.release_version || format('build-{0}', github.run_number) }} \
             -DLICHII_BUILD_PLATFORM=${{ matrix.platform }} \
             -DUSE_DISCORD_PRESENCE=OFF \
             -DUSE_CCACHE=ON

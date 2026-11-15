@@ -60,7 +60,18 @@ std::vector<Asset> Release::GetPlatformAssets(std::string_view platform,
     for (const std::string_view variant : pgo ? std::vector<std::string_view>{"-pgo", ""}
                                               : std::vector<std::string_view>{""}) {
         for (const auto extension : extensions) {
-            const auto filename = fmt::format("lichii-{}{}{}", platform, variant, extension);
+            // (LaküenPlay) this fork's names, LakuenPlay-v1.0.5-Handheld-x86_64-pgo.AppImage (the tag without its
+            // "handheld-", the device built into this binary); Lichii's lichii-linux-x86_64-pgo.AppImage without one
+            const std::string_view device = Common::g_lakuen_asset_device;
+            std::string_view shown = tag;
+            if (shown.starts_with("handheld-")) {
+                shown.remove_prefix(9);
+            }
+            const auto filename =
+                device.empty()
+                    ? fmt::format("lichii-{}{}{}", platform, variant, extension)
+                    : fmt::format("LakuenPlay-{}-{}-{}{}{}", shown, device,
+                                  platform.substr(platform.find('-') + 1), variant, extension);
             const auto url = host_url + path + filename;
             if (std::ranges::find(assets, url) == assets.end()) {
                 continue;
