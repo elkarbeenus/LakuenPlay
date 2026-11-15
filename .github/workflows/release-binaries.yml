@@ -1,6 +1,6 @@
 name: release-binaries
 # (this fork) The run title says what the build contains: the note given at dispatch, else the branch.
-run-name: "${{ inputs.note || github.ref_name }} · ${{ inputs.device == 'legion_go_s' && 'Legion Go S' || 'Steam Deck' }} · PGO ${{ inputs.pgo_mode == 'generate' && 'Mess-Build (instrumentiert)' || 'normal' }}"
+run-name: "${{ inputs.note || github.ref_name }} · ${{ inputs.device == 'legion_go_s' && 'Legion Go S' || inputs.device == 'pc' && 'PC' || 'Steam Deck' }} · PGO ${{ inputs.pgo_mode == 'generate' && 'Mess-Build (instrumentiert)' || 'normal' }}"
 
 on:
   workflow_dispatch:
@@ -19,6 +19,7 @@ on:
         options:
           - steamdeck
           - legion_go_s
+          - pc
         default: steamdeck
       pgo_mode:
         description: "PGO build: use = with the device's profile, generate = an instrumented build that records a profile to /home/deck/lichii-pgo"
@@ -63,9 +64,10 @@ permissions:
 env:
   PGO_LLVM_VERSION: "23"
   # (this fork) File and artifact name of the handheld build (no umlaut in file names).
-  APP_LABEL: ${{ inputs.device == 'legion_go_s' && 'LakuenPlay-LegionGoS' || 'LakuenPlay-Handheld' }}
+  APP_LABEL: ${{ inputs.device == 'legion_go_s' && 'LakuenPlay-LegionGoS' || inputs.device == 'pc' && 'LakuenPlay-PC' || 'LakuenPlay-Handheld' }}
   # (this fork) the CPU the build is compiled for, and the folder of its recorded profiles
-  BUILD_PRESET: ${{ inputs.device == 'legion_go_s' && 'zen3' || 'zen2' }}
+  # (pc: x86-64-v3, AVX2 and FMA, any PC CPU since 2013-2015; the handhelds their own cores)
+  BUILD_PRESET: ${{ inputs.device == 'legion_go_s' && 'zen3' || inputs.device == 'pc' && 'v3' || 'zen2' }}
   PGO_DIR: ${{ inputs.device == 'legion_go_s' && 'pgo/legion_go_s' || 'pgo' }}
   RELEASE_TAG: ${{ inputs.release_version || format('build-{0}', github.run_number) }}
 
@@ -321,10 +323,10 @@ jobs:
             .sccache
           # The profile's hash is part of the key, so objects built against an older profile are
           # never restored.
-          key: objects-${{ matrix.platform }}${{ inputs.device == 'legion_go_s' && '-zen3' || '' }}${{ (matrix.pgo && inputs.pgo_mode == 'generate') && '-instrumented' || '' }}${{ matrix.profile && format('-{0}', hashFiles(matrix.profile)) || '' }}-v2-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: objects-${{ matrix.platform }}${{ inputs.device == 'legion_go_s' && '-zen3' || inputs.device == 'pc' && '-v3' || '' }}${{ (matrix.pgo && inputs.pgo_mode == 'generate') && '-instrumented' || '' }}${{ matrix.profile && format('-{0}', hashFiles(matrix.profile)) || '' }}-v2-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            objects-${{ matrix.platform }}${{ inputs.device == 'legion_go_s' && '-zen3' || '' }}${{ (matrix.pgo && inputs.pgo_mode == 'generate') && '-instrumented' || '' }}${{ matrix.profile && format('-{0}', hashFiles(matrix.profile)) || '' }}-v2-${{ github.sha }}-
-            objects-${{ matrix.platform }}${{ inputs.device == 'legion_go_s' && '-zen3' || '' }}${{ (matrix.pgo && inputs.pgo_mode == 'generate') && '-instrumented' || '' }}${{ matrix.profile && format('-{0}', hashFiles(matrix.profile)) || '' }}-v2-
+            objects-${{ matrix.platform }}${{ inputs.device == 'legion_go_s' && '-zen3' || inputs.device == 'pc' && '-v3' || '' }}${{ (matrix.pgo && inputs.pgo_mode == 'generate') && '-instrumented' || '' }}${{ matrix.profile && format('-{0}', hashFiles(matrix.profile)) || '' }}-v2-${{ github.sha }}-
+            objects-${{ matrix.platform }}${{ inputs.device == 'legion_go_s' && '-zen3' || inputs.device == 'pc' && '-v3' || '' }}${{ (matrix.pgo && inputs.pgo_mode == 'generate') && '-instrumented' || '' }}${{ matrix.profile && format('-{0}', hashFiles(matrix.profile)) || '' }}-v2-
 
       - name: Configure Linux
         if: startsWith(matrix.platform, 'linux')
@@ -349,7 +351,7 @@ jobs:
             -DLICHII_BUILD_PLATFORM=${{ matrix.platform }}
             # (this fork) the release's tag above and its assets' device: the update checker looks for
             # LakuenPlay-<version>-<device>-x86_64[-pgo].AppImage in this repository's releases of the same track
-            -DLAKUEN_ASSET_DEVICE=${{ inputs.device == 'legion_go_s' && 'LegionGoS' || 'Handheld' }}
+            -DLAKUEN_ASSET_DEVICE=${{ inputs.device == 'legion_go_s' && 'LegionGoS' || inputs.device == 'pc' && 'PC' || 'Handheld' }}
             -DUSE_DISCORD_PRESENCE=OFF
             -DUSE_CCACHE=ON
             # (this fork, handheld) Zen 2 code: the Steam Deck is Zen 2, the Legion Go S (Z2 Go) Zen 3+.

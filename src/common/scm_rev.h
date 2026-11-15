@@ -27,7 +27,14 @@ extern const char g_compiler_id[];
 
 // (LaküenPlay) The name in the window title, the log and the About dialog. It is based on Lichii
 // and Eden; data folders and settings stay those of Lichii.
+// (LaküenPlay) the build's device, from CMake's LAKUEN_ASSET_DEVICE (one build per device)
+#if defined(LAKUEN_DEVICE_PC)
+inline constexpr const char g_app_label[] = "LaküenPlay – PC";
+#elif defined(LAKUEN_DEVICE_LEGION_GO_S)
+inline constexpr const char g_app_label[] = "LaküenPlay – Legion Go S";
+#else
 inline constexpr const char g_app_label[] = "LaküenPlay – Handheld";
+#endif
 
 extern const bool g_is_dev_build;
 extern const bool g_is_nightly_build;
