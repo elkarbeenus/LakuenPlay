@@ -102,10 +102,15 @@ std::optional<Common::Net::Release> SelectUpdate(std::span<const Common::Net::Re
     return selected ? std::make_optional(*selected) : std::nullopt;
 }
 
+bool IsReleaseBuild(std::string_view build_tag, std::string_view platform) {
+    // (LaküenPlay) this fork's tags: v1.3.2, handheld-v1.0.8 or build-N (ParseVersion)
+    return ParseVersion(build_tag).has_value() && !platform.empty();
+}
+
 CheckResult Check() {
     if (!ParseVersion(Common::g_build_release_tag) ||
         std::string_view{Common::g_build_release_platform}.empty()) {
-        return {};
+        return {.failure = Failure::NotReleaseBuild};
     }
 
     const auto list = Common::Net::GetReleases();
