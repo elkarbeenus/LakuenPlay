@@ -60,6 +60,9 @@ TEST_CASE("Only builds with a release tag and platform compare against releases"
     CHECK(UpdateChecker::IsReleaseBuild("build-71", "windows-x86_64"));
     CHECK(UpdateChecker::IsReleaseBuild("build-260", "linux-x86_64-pgo"));
     CHECK_FALSE(UpdateChecker::IsReleaseBuild("build-71", ""));
+    // (LaküenPlay) this fork's PC and handheld tags
+    CHECK(UpdateChecker::IsReleaseBuild("v1.3.2", "linux-x86_64-pgo"));
+    CHECK(UpdateChecker::IsReleaseBuild("handheld-v1.0.8", "linux-x86_64"));
     const std::string tag =
         GENERATE("", "nx2", "abc1234567-nx2", "build-", "build-0", "build-71junk");
     CHECK_FALSE(UpdateChecker::IsReleaseBuild(tag, "windows-x86_64"));
