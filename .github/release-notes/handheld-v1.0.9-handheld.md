@@ -1,0 +1,46 @@
+> [!WARNING]
+> **Test build.** This release is for testing on the Steam Deck and the Legion Go S and will be replaced by a regular
+> release once it is confirmed.
+
+> [!NOTE]
+> **From v1.0.6 this update arrives by itself:** LaküenPlay says at start that v1.0.9 is out, downloads it, replaces
+> itself and starts again. Coming from v1.0.5 or older, download this one by hand once.
+
+**LaküenPlay v1.0.9 – Handheld** brings Lichii's work of 17 and 18 November: fewer shader stutters, fewer
+GPU state changes per draw, and fixes to write-backs, staging buffers and the frame limiter.
+
+> [!IMPORTANT]
+> This is an unofficial fork, not an official Lichii release. Please report problems [here](https://github.com/elkarbeenus/LakuenPlay/issues), not upstream. Games, keys and firmware are not included: only use content you have legally obtained.
+
+## Downloads
+
+| File | What it is |
+| --- | --- |
+| `LakuenPlay-v1.0.9-Handheld-x86_64-pgo.AppImage` | **Recommended.** Self-contained, compiled for Zen 2 and later with profile-guided optimization (a profile recorded on a Steam Deck) |
+| `LakuenPlay-v1.0.9-Handheld-x86_64.AppImage` | The same program without PGO |
+| `*.tar.gz` | Plain binaries that use your system libraries |
+| `SHA256SUMS.txt` | Checksums |
+
+## From Lichii (17-18 November)
+
+- **Fewer shader stutters:** shaders compile in the background by default (asynchronous shaders on), instead of the game
+  waiting for each new one ([#2105](https://github.com/zortos293/Lichii/pull/2105)). A shader not ready yet is drawn a
+  moment later.
+- **Less work per draw:** pipelines with the same bindings share their layouts, and fast draws stay fast across more state
+  changes (vertex streams, occlusion counters, render enable).
+- **Stability:** staging buffers counted only once they exist ([#2129](https://github.com/zortos293/Lichii/pull/2129)); the
+  inline index buffer kept in step with its deletion ([#2163](https://github.com/zortos293/Lichii/pull/2163)); a fallback
+  address space maps the whole image ([#2135](https://github.com/zortos293/Lichii/pull/2135)); write-backs that already landed
+  are no longer overwritten by older ones ([#2133](https://github.com/zortos293/Lichii/pull/2133),
+  [#2134](https://github.com/zortos293/Lichii/pull/2134)); shader fixes ([#2132](https://github.com/zortos293/Lichii/pull/2132),
+  [#2140](https://github.com/zortos293/Lichii/pull/2140)).
+- **Frame limiter:** timer starts count against the FPS limit ([#2137](https://github.com/zortos293/Lichii/pull/2137)), Dynamic
+  FPS and frame-rate unlock mods stay on the vsync timer ([#2136](https://github.com/zortos293/Lichii/pull/2136)).
+- Also: a HOME Menu with its own hotkey, BCAT downloads through Nextendo, and many fixes for newer games.
+
+This fork's handheld work (memory guard, low-RAM texture limit, heap trimming, pipeline eviction, the depth clear without
+an upload, the recommended handheld settings, the master log, updates from this repository) stays as in v1.0.8.
+
+## Credits
+
+Built on **[Lichii](https://github.com/zortos293/Lichii)** (zortos293 and contributors), **[Eglantine](https://github.com/Djihads80/Eglantine)**, **Eden**, **yuzu**, **Sudachi** and **Citra**, with work from [Fritchii](https://github.com/Frizti/Fritchii). Thank you!
