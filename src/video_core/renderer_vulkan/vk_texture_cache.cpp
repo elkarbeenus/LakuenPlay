@@ -5752,7 +5752,9 @@ void TextureCacheRuntime::TranscodeAstcToBcn(
 
     std::array<VkExtent3D, 16> targets{};   // (LaküenPlay: each level's even BC shape)
     for (u32 level = 0; level < levels && level < targets.size(); ++level) {
-        targets[level] = copies[level].image_extent;
+        targets[level] = VkExtent3D{copies[level].image_extent.width,
+                                    copies[level].image_extent.height,
+                                    copies[level].image_extent.depth};
     }
     TranscodeAstcBatches(*astc_decoder_pass, *bc_encoder_pass, info, image.guest_size_bytes, map,
                          swizzles, *pending.image, pending.views, batch, bc3, output.buffer,
