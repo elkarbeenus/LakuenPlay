@@ -3911,6 +3911,22 @@ ComputePipelineCacheEntry PipelineCache::CreateComputePipeline(
 bool PipelineCache::SerializeVulkanPipelineCache(const std::filesystem::path& filename,
                                                  const vk::PipelineCache& pipeline_cache,
                                                  u32 cache_version) {
+    // (LaküenPlay, from Fritchii 6a891ecfd after HeyListen 81e0a4f26) A boot whose pipelines were
+    // all in the cache counted as many builds as one that made them, and wrote the same file
+    // again: the whole cache read into new memory and through the file cache, which on a
+    // handheld pushes the game's pages out. Skipped when the driver's data has the size it had
+    // when read or last written. FRITCHII_PCACHE_SAVE=0: every save writes, as before.
+    static const bool lean_saves = [] {
+        const char* value = std::getenv("FRITCHII_PCACHE_SAVE");
+        return value == nullptr || value[0] != '0';
+    }();
+    if (lean_saves && pipeline_cache) {
+        size_t size_now = 0;
+        pipeline_cache.Read(&size_now, nullptr);
+        if (size_now == saved_cache_size.load(std::memory_order_relaxed)) {
+            return true;
+        }
+    }
     // Written beside the cache and renamed over it: the emulator stopped mid-write left the cache
     // empty, and every later boot failed to read it.
     auto temporary = filename;
@@ -3961,6 +3977,11 @@ bool PipelineCache::SerializeVulkanPipelineCache(const std::filesystem::path& fi
         return false;
     }
 
+    if (pipeline_cache) {
+        size_t written = 0;
+        pipeline_cache.Read(&written, nullptr);
+        saved_cache_size.store(written, std::memory_order_relaxed);
+    }
     LOG_INFO(Render_Vulkan, "Vulkan driver pipelines cached at: {}",
              Common::FS::PathToUTF8String(filename));
     return true;
@@ -4027,6 +4048,7 @@ vk::PipelineCache PipelineCache::LoadVulkanPipelineCache(const std::filesystem::
         try {
             auto restored = create_pipeline_cache(cache_size, cache_data.data());
             vulkan_pipeline_cache_restored = true;
+            saved_cache_size.store(cache_size, std::memory_order_relaxed);   // (FRITCHII_PCACHE_SAVE)
             return restored;
         } catch (const vk::Exception& e) {
             // The blob came from another driver or driver version (e.g. switching between

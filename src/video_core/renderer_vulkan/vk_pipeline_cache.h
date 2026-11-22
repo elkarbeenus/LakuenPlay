@@ -272,7 +272,8 @@ private:
     /// Cancels the v2 prebuild and waits for its running stages
     void StopBackgroundJobs();
 
-    /// Returns true when the file was written and replaced the previous one.
+    /// Returns true when the file was written and replaced the previous one, or already held this
+    /// data (FRITCHII_PCACHE_SAVE: a save of the same size is skipped).
     bool SerializeVulkanPipelineCache(const std::filesystem::path& filename,
                                       const vk::PipelineCache& pipeline_cache, u32 cache_version);
 
@@ -400,6 +401,9 @@ private:
     size_t pipelines_since_flush{};
     std::chrono::steady_clock::time_point last_flush{};
     std::atomic<size_t> last_cache_size{};
+    /// (LaküenPlay, Fritchii 6a891ecfd) the cache file's data size as last read or written; ~0:
+    /// none. A save of the same size is skipped (FRITCHII_PCACHE_SAVE)
+    std::atomic<size_t> saved_cache_size{~size_t{0}};
     std::atomic_bool flush_in_flight{};
 
     /// Requested first when the cache is destroyed, to stop a rewrite of the disk cache: Android
