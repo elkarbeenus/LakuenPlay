@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <span>
 #include <type_traits>
@@ -44,6 +45,11 @@ class MemoryManager;
 
 namespace VideoCommon {
 class GpuSplit;
+}
+
+namespace VideoCommon::Nx2RenderView {
+class Writes;
+void NoteWrite(Writes& writes, u32 index) noexcept;
 }
 
 namespace VideoCore {
@@ -3259,6 +3265,9 @@ public:
         Tables tables{};
     } dirty;
 
+    /// EDEN_NX2_RENDER_VIEW_VERIFY: the words and bindings the next draw sends GPURender's view.
+    std::unique_ptr<VideoCommon::Nx2RenderView::Writes> render_view_writes;
+
     DrawManager draw_manager;
 
     GPUVAddr GetMacroAddress(size_t index) const {
@@ -3354,6 +3363,9 @@ private:
         regs.reg_array[method] = argument;
         for (const auto& table : dirty.tables) {
             dirty.flags[table[method]] = true;
+        }
+        if (render_view_writes) [[unlikely]] {
+            VideoCommon::Nx2RenderView::NoteWrite(*render_view_writes, method);
         }
     }
 

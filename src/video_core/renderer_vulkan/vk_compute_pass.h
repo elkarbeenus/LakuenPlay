@@ -198,6 +198,20 @@ private:
     ComputePassDescriptorQueue& compute_pass_descriptor_queue;
 };
 
+/// Decodes the ASTC array `info` in `map` into `decode` (RGBA8 with `batch` layers, one storage
+/// view per level) and encodes it into `output`, `batch` layers at a time. Each level's blocks
+/// start at `level_offsets` and take `layer_bytes` a layer. The last batch's decode submits.
+/// (LaküenPlay) `targets`: each level's even BC shape; the decode's own shape is the source, so an
+/// uneven-mip ASTC is re-compressed from a resample on AMD instead of read past its edge.
+void TranscodeAstcBatches(ASTCDecoderPass& decoder, BcEncoderPass& encoder,
+                          const VideoCommon::ImageInfo& info, size_t guest_size_bytes,
+                          const StagingBufferRef& map,
+                          std::span<const VideoCommon::SwizzleParameters> swizzles, VkImage decode,
+                          std::span<const vk::ImageView> level_views, u32 batch, bool bc3,
+                          VkBuffer output, VkDeviceSize output_offset, VkDeviceSize output_size,
+                          std::span<const u64> level_offsets, std::span<const u64> layer_bytes,
+                          std::span<const VkExtent3D> targets);   // (LaküenPlay: each level's BC shape)
+
 class BlockLinearUnswizzle3DPass final : public ComputePass {
 public:
     explicit BlockLinearUnswizzle3DPass(const Device& device_, Scheduler& scheduler_,
