@@ -100,6 +100,8 @@ Running it again doesn't overwrite records or undo moderation.
 
 GameBanana entries are links to third-party listings, not locally hosted mods.
 See [the import guide](GAMEBANANA.md) to refresh them and remove the demo listings.
+See [the GitHub patch catalog guide](GITHUB.md) for verified direct downloads
+of pinned patches and cheats.
 
 ## Back up or restore
 
