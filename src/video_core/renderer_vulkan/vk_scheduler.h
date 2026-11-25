@@ -60,8 +60,17 @@ public:
     /// Every entry point: waits for the draw packet GPURender records, then plays the buffer
     /// commands this thread queued (BufferArena), so both keep their place before what follows.
     void JoinRecorders(std::source_location site = std::source_location::current()) const {
-        VideoCommon::GpuSplit::JoinRender(site);
-        BufferArena::PlayPending();
+        if (render_recorders) {
+            JoinActiveRecorders(site);
+        }
+    }
+
+    [[nodiscard]] bool RenderRecordersEnabled() const {
+        return render_recorders;
+    }
+
+    [[nodiscard]] bool BufferArenaEnabled() const {
+        return buffer_arena;
     }
 
     /// Sends the current execution context to the GPU.
@@ -79,6 +88,9 @@ public:
     bool DeferFlush();
     /// Submits deferred work (the split's back, from its idle hook).
     void FlushDeferred();
+    /// Whether the last submit is old enough, the GPU has completed it, and work is waiting
+    /// outside a render pass. Called by the recording thread before starting a draw or dispatch.
+    bool IdleGpuAwaitsWork();
     /// Threads other than the split's back: waits until tick is submitted, asking the back to
     /// submit deferred work (logged every 2 s while it waits). False only when the back thread
     /// is not running, so nothing will submit it: the caller then submits it itself.
@@ -178,6 +190,11 @@ public:
     bool IsRenderPassActive() const {
         JoinRecorders();
         return state.renderpass != VK_NULL_HANDLE;
+    }
+
+    bool IsBetweenRenderPasses() const {
+        JoinRecorders();
+        return state.renderpass == VK_NULL_HANDLE && deferred_clear.framebuffer == nullptr;
     }
 
     /// Changes whenever a render pass begins or ends.
@@ -379,6 +396,7 @@ public:
 
 private:
     std::chrono::steady_clock::time_point last_flush{};
+    std::chrono::steady_clock::time_point next_idle_gpu_check{};
     bool flush_pending{};
     u64 record_serial{};    ///< Commands recorded
     u64 submitted_serial{}; ///< record_serial at the last Flush or Finish
@@ -530,8 +548,12 @@ private:
 
     void AcquireNewChunk();
 
+    static void JoinActiveRecorders(std::source_location site);
+
     const Device& device;
     StateTracker& state_tracker;
+    const bool render_recorders;
+    const bool buffer_arena;
 
     std::unique_ptr<MasterSemaphore> master_semaphore;
     FragmentBarrierState fragment_barrier;

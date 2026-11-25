@@ -112,6 +112,8 @@ void Scheduler::CommandChunk::ExecuteAll(vk::CommandBuffer cmdbuf,
 
 Scheduler::Scheduler(const Device& device_, StateTracker& state_tracker_)
     : device{device_}, state_tracker{state_tracker_},
+      render_recorders{VideoCommon::GpuSplit::RenderThreadOn()},
+      buffer_arena{render_recorders && VideoCommon::GpuSplit::RenderSwitch("EDEN_NX2_BUFFER_ARENA")},
       master_semaphore{std::make_unique<MasterSemaphore>(device)},
       command_pool{std::make_unique<CommandPool>(*master_semaphore, device)},
       upload_batch{std::make_unique<UploadBatch>()} {
@@ -178,6 +180,11 @@ Scheduler::Scheduler(const Device& device_, StateTracker& state_tracker_)
     worker_thread = std::jthread([this](std::stop_token token) { WorkerThread(token); });
 }
 
+void Scheduler::JoinActiveRecorders(std::source_location site) {
+    VideoCommon::GpuSplit::JoinRender(site);
+    BufferArena::PlayPending();
+}
+
 Scheduler::~Scheduler() {
     if (trace_query_pool) {
         WaitWorker();
@@ -240,6 +247,30 @@ void Scheduler::FlushDeferred() {
     if (flush_pending) {
         Flush();
     }
+}
+
+bool Scheduler::IdleGpuAwaitsWork() {
+    // Mario Kart World: the back records ~1 ms of draws per 128-draw submission while the GPU
+    // sits idle, then what waits on that work (a command list copy, a fence-delayed semaphore
+    // release) waits for the GPU to run all of it. 100 us left the least of that wait among 50,
+    // 100 and 200 us.
+    static constexpr auto age = std::chrono::microseconds{100};
+    // Don't wait for a follower packet just to probe. A deferred clear belongs to the next pass.
+    if ((render_recorders && VideoCommon::GpuSplit::BackHasPendingRender()) || state.renderpass ||
+        deferred_clear.framebuffer || !RecordedSinceSubmit()) {
+        return false;
+    }
+    const auto now = std::chrono::steady_clock::now();
+    if (now - last_flush < age || now < next_idle_gpu_check) {
+        return false;
+    }
+    // Rate-limit refresh attempts while the GPU stays busy.
+    next_idle_gpu_check = now + age;
+    const u64 last_submitted = CurrentTick() - 1;
+    if (!IsFree(last_submitted)) {
+        master_semaphore->Refresh();
+    }
+    return IsFree(last_submitted);
 }
 
 bool Scheduler::WaitSubmitted(u64 tick) {
